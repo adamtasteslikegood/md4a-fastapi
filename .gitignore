@@ -1,0 +1,6 @@
+.env
+.venv/
+.md4a-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
