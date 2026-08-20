@@ -14,7 +14,9 @@ def test_client_only_accepts_markdown_content_type() -> None:
         return httpx.Response(200, text="# Agent page", headers={"content-type": "text/markdown"})
 
     result = __import__("asyncio").run(
-        MarkdownForAgentsClient(transport=httpx.MockTransport(handler)).fetch("https://example.com/page")
+        MarkdownForAgentsClient(transport=httpx.MockTransport(handler)).fetch(
+            "https://example.com/page"
+        )
     )
     assert result.available
     assert result.markdown == "# Agent page"

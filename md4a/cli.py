@@ -42,4 +42,3 @@ def main() -> None:
         uvicorn.run("md4a.app:app", host=args.host, port=args.port)
     else:
         raise SystemExit(asyncio.run(_fetch(args.url, args.output)))
-

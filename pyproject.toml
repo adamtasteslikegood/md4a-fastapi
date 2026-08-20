@@ -3,11 +3,23 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "md4a"
+name = "md4a-fastapi"
 version = "0.1.0"
-description = "Markdown-for-Agents discovery, storage, and FastAPI middleware"
+description = "Markdown for Agents discovery, storage, and middleware for FastAPI"
 readme = "README.md"
 requires-python = ">=3.11"
+keywords = ["agents", "ai", "asgi", "fastapi", "markdown"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
 dependencies = [
   "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
@@ -16,11 +28,28 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9"]
+test = [
+  "pytest>=8,<9",
+  "ruff>=0.12,<1",
+]
 
 [project.scripts]
 md4a = "md4a.cli:main"
 
+[project.urls]
+Documentation = "https://github.com/adamtasteslikegood/md4a-fastapi#readme"
+Issues = "https://github.com/adamtasteslikegood/md4a-fastapi/issues"
+Repository = "https://github.com/adamtasteslikegood/md4a-fastapi"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["md4a"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
