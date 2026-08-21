@@ -43,8 +43,8 @@ validation, and CodeQL. Dependabot monitors Python and GitHub Actions dependenci
 
 The `Publish to PyPI` workflow runs for published GitHub releases and uses OIDC
 Trusted Publishing through the protected `pypi` environment. Do not replace it
-with a repository API token. Before publishing, confirm that a license has been
-selected, the package name is registered, the version is unique, and CI is green.
+with a repository API token. Before publishing, confirm that the package name is
+registered, the version is unique, and CI is green.
 
 ## Documentation
 

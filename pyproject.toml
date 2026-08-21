@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,10 +8,13 @@ version = "0.1.0"
 description = "Markdown for Agents discovery, storage, and middleware for FastAPI"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["agents", "ai", "asgi", "fastapi", "markdown"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Framework :: FastAPI",
+  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",

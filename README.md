@@ -122,5 +122,4 @@ converted Markdown is identical to a publisher-authored agent representation.
 
 ## License
 
-A license has not yet been selected. Choose and add one before the first public
-PyPI release so users know how they may use and contribute to the project.
+Licensed under the [MIT License](LICENSE).

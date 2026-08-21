@@ -72,7 +72,7 @@ Maintainers use squash merges so the pull request title becomes the commit on
 
 Releases are built from GitHub release tags matching `v*`. The publish workflow
 uses PyPI Trusted Publishing and a protected GitHub environment named `pypi`.
-Maintainers must verify the package version, changelog/release notes, license,
-CI status, and built artifacts before creating a release.
+Maintainers must verify the package version, changelog/release notes, CI status,
+and built artifacts before creating a release.
 
 Do not add API tokens to the repository or workflow files.
