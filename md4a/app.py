@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Response
 
+from . import __version__
 from .client import MarkdownForAgentsClient
 from .store import FileStore
 
@@ -18,7 +19,7 @@ def create_app() -> FastAPI:
     )
     store = FileStore(cache_dir)
     client = MarkdownForAgentsClient(allowed_hosts=allowed_hosts)
-    app = FastAPI(title="md4a", version="0.1.0")
+    app = FastAPI(title="md4a", version=__version__)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

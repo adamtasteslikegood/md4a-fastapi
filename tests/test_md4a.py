@@ -3,9 +3,15 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 
+from md4a import __version__
+from md4a.app import create_app
 from md4a.client import MarkdownForAgentsClient
 from md4a.middleware import add_md4a
 from md4a.store import MemoryStore
+
+
+def test_standalone_app_uses_package_version() -> None:
+    assert create_app().version == __version__
 
 
 def test_client_only_accepts_markdown_content_type() -> None:
