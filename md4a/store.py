@@ -51,4 +51,3 @@ class FileStore:
             index = {}
         index[key] = path.name
         index_path.write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-

@@ -78,7 +78,11 @@ class MarkdownForAgentsClient:
                     content_type = response.headers.get("content-type", "")
                     media_type = content_type.partition(";")[0].strip().lower()
                     body = b"".join(chunks)
-                    markdown = body.decode(response.encoding or "utf-8") if media_type == MARKDOWN_ACCEPT else None
+                    markdown = (
+                        body.decode(response.encoding or "utf-8")
+                        if media_type == MARKDOWN_ACCEPT
+                        else None
+                    )
                     return FetchResult(
                         requested_url=url,
                         final_url=str(response.url),

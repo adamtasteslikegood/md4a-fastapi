@@ -1,0 +1,61 @@
+name: Bug report
+description: Report reproducible incorrect behavior in md4a-fastapi
+title: "bug: "
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report a problem. Do not include secrets or private content.
+  - type: input
+    id: version
+    attributes:
+      label: md4a-fastapi version
+      description: Output from `python -c "import md4a; print(md4a.__version__)"` or the commit SHA.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: 3.13.5
+    validations:
+      required: true
+  - type: input
+    id: fastapi
+    attributes:
+      label: FastAPI version
+      placeholder: 0.116.0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest safe code or commands that reproduce the problem.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: headers
+    attributes:
+      label: Relevant request and response details
+      description: Include sanitized Accept and Content-Type headers, status codes, and logs.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I removed credentials, private URLs, and sensitive content.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
