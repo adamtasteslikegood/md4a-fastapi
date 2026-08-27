@@ -103,7 +103,7 @@ Required GitHub checks are:
 - `Test (Python 3.11)` through `Test (Python 3.14)`
 - `Build package`
 - `Analyze (Python)` / CodeQL
-- `GitGuardian Security Checks`
+- `GitGuardian Security Checks` (provided by a GitHub App/integration, if enabled)
 
 ## CI, security, and dependency automation
 
