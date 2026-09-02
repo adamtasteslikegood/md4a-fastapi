@@ -33,14 +33,15 @@ Using [uv](https://docs.astral.sh/uv/) (recommended):
 ```bash
 git clone https://github.com/adamtasteslikegood/md4a-fastapi.git
 cd md4a-fastapi
-uv venv .venv
-source .venv/bin/activate
-uv pip install -e '.[test]'
+uv sync --extra test
 ```
 
-On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. The
-`--active` flag in the commands below makes `uv` use this activated virtual
-environment.
+This creates or updates the project virtual environment in `.venv`, installs
+the package in editable mode, and installs the test tools. No activation is
+needed when using the `uv run` commands below. If you prefer to activate the
+environment, use `source .venv/bin/activate` on macOS/Linux or
+`.venv\Scripts\Activate.ps1` in Windows PowerShell, then run the commands
+without the `uv run` prefix.
 
 Using Python's built-in venv and pip:
 
@@ -105,21 +106,20 @@ response types pass through unchanged.
 
 ## Remote discovery and standalone service
 
-After installing with uv, run the CLI through the active virtual environment:
+With the uv-managed project environment, run the CLI with `uv run`:
 
 ```bash
 # Show all commands
-uv run --active md4a -h
+uv run md4a -h
 
 # Verify that the origin returns text/markdown, then save it
-uv run --active md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
+uv run md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
 
 # Start the standalone API
-uv run --active md4a serve --host 127.0.0.1 --port 8000
+uv run md4a serve --host 127.0.0.1 --port 8000
 ```
 
-After installing with pip, use the same commands without the `uv run --active`
-prefix:
+After installing with pip, use the same commands without the `uv run` prefix:
 
 ```bash
 # Show all commands

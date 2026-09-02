@@ -15,12 +15,14 @@ Using uv (recommended):
 ```bash
 git clone https://github.com/adamtasteslikegood/md4a-fastapi.git
 cd md4a-fastapi
-uv venv .venv
-source .venv/bin/activate
-uv pip install -e '.[test]'
+uv sync --extra test
 ```
 
-On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
+This creates or updates `.venv`, installs the package in editable mode, and
+installs the test tools. No activation is needed when using `uv run`. If you
+prefer to activate the environment, use `source .venv/bin/activate` on
+macOS/Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell, then run
+commands without the `uv run` prefix.
 
 Using Python's built-in venv and pip:
 
@@ -38,8 +40,8 @@ On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
 Confirm the installation:
 
 ```bash
-uv run --active md4a -h
-uv run --active pytest -q
+uv run md4a -h
+uv run pytest -q
 ```
 
 If you installed with pip, run the same checks directly:
@@ -71,7 +73,7 @@ def hello() -> str:
 Run it:
 
 ```bash
-uv run --active uvicorn example:app --reload
+uv run uvicorn example:app --reload
 ```
 
 With a pip installation, use:
@@ -116,16 +118,16 @@ The provider key includes the request path and, when present, its query string.
 Print verified Markdown to standard output:
 
 ```bash
-uv run --active md4a fetch https://blog.cloudflare.com/the-agentic-internet/
+uv run md4a fetch https://blog.cloudflare.com/the-agentic-internet/
 ```
 
 Write it to a file:
 
 ```bash
-uv run --active md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
+uv run md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
 ```
 
-With a pip installation, omit the `uv run --active` prefix from these commands.
+With a pip installation, omit the `uv run` prefix from these commands.
 
 The command exits with status `2` when the page responds successfully but does
 not advertise `text/markdown`.
@@ -137,7 +139,7 @@ Restrict outbound requests to known hosts before exposing the service:
 ```bash
 export MD4A_ALLOWED_HOSTS=blog.cloudflare.com,developers.cloudflare.com
 export MD4A_CACHE_DIR=.md4a-cache
-uv run --active md4a serve --host 127.0.0.1 --port 8000
+uv run md4a serve --host 127.0.0.1 --port 8000
 ```
 
 With a pip installation, run `md4a serve --host 127.0.0.1 --port 8000` instead.
