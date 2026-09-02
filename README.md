@@ -28,6 +28,22 @@ responses.
 
 The package has not been published to PyPI yet. For local development:
 
+Using [uv](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+git clone https://github.com/adamtasteslikegood/md4a-fastapi.git
+cd md4a-fastapi
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e '.[test]'
+```
+
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. The
+`--active` flag in the commands below makes `uv` use this activated virtual
+environment.
+
+Using Python's built-in venv and pip:
+
 ```bash
 git clone https://github.com/adamtasteslikegood/md4a-fastapi.git
 cd md4a-fastapi
@@ -38,6 +54,14 @@ python -m pip install -e '.[test]'
 ```
 
 After the first release:
+
+With uv:
+
+```bash
+uv pip install md4a-fastapi
+```
+
+With pip:
 
 ```bash
 python -m pip install md4a-fastapi
@@ -81,6 +105,22 @@ response types pass through unchanged.
 
 ## Remote discovery and standalone service
 
+After installing with uv, run the CLI through the active virtual environment:
+
+```bash
+# Show all commands
+uv run --active md4a -h
+
+# Verify that the origin returns text/markdown, then save it
+uv run --active md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
+
+# Start the standalone API
+uv run --active md4a serve --host 127.0.0.1 --port 8000
+```
+
+After installing with pip, use the same commands without the `uv run --active`
+prefix:
+
 ```bash
 # Show all commands
 md4a -h
@@ -93,6 +133,9 @@ md4a serve --host 127.0.0.1 --port 8000
 curl -H 'Accept: text/markdown' \
   'http://127.0.0.1:8000/fetch?url=https%3A%2F%2Fblog.cloudflare.com%2Fthe-agentic-internet%2F'
 ```
+
+The uv and pip commands above start the same standalone FastAPI service. Keep
+the server running in one terminal and use the `curl` request from another.
 
 The remote client sends `Accept: text/markdown` and only considers the page
 available when the origin confirms `Content-Type: text/markdown`. Redirects are

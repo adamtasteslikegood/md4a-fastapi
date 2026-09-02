@@ -6,8 +6,23 @@ This guide gets the middleware or standalone service running locally.
 
 - Python 3.11 or newer
 - Git
+- Either [uv](https://docs.astral.sh/uv/) (recommended) or pip
 
 ## Set up a development environment
+
+Using uv (recommended):
+
+```bash
+git clone https://github.com/adamtasteslikegood/md4a-fastapi.git
+cd md4a-fastapi
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e '.[test]'
+```
+
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
+
+Using Python's built-in venv and pip:
 
 ```bash
 git clone https://github.com/adamtasteslikegood/md4a-fastapi.git
@@ -21,6 +36,13 @@ python -m pip install -e '.[test]'
 On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
 
 Confirm the installation:
+
+```bash
+uv run --active md4a -h
+uv run --active pytest -q
+```
+
+If you installed with pip, run the same checks directly:
 
 ```bash
 md4a -h
@@ -47,6 +69,12 @@ def hello() -> str:
 ```
 
 Run it:
+
+```bash
+uv run --active uvicorn example:app --reload
+```
+
+With a pip installation, use:
 
 ```bash
 uvicorn example:app --reload
@@ -88,14 +116,16 @@ The provider key includes the request path and, when present, its query string.
 Print verified Markdown to standard output:
 
 ```bash
-md4a fetch https://blog.cloudflare.com/the-agentic-internet/
+uv run --active md4a fetch https://blog.cloudflare.com/the-agentic-internet/
 ```
 
 Write it to a file:
 
 ```bash
-md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
+uv run --active md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
 ```
+
+With a pip installation, omit the `uv run --active` prefix from these commands.
 
 The command exits with status `2` when the page responds successfully but does
 not advertise `text/markdown`.
@@ -107,8 +137,10 @@ Restrict outbound requests to known hosts before exposing the service:
 ```bash
 export MD4A_ALLOWED_HOSTS=blog.cloudflare.com,developers.cloudflare.com
 export MD4A_CACHE_DIR=.md4a-cache
-md4a serve --host 127.0.0.1 --port 8000
+uv run --active md4a serve --host 127.0.0.1 --port 8000
 ```
+
+With a pip installation, run `md4a serve --host 127.0.0.1 --port 8000` instead.
 
 Then fetch through the API:
 
