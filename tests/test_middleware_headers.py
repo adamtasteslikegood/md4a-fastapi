@@ -1,3 +1,4 @@
+import asyncio
 import gzip
 
 import pytest
@@ -5,8 +6,10 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.types import Message, Receive, Scope, Send
 
 from md4a import MemoryStore, add_md4a
+from md4a.middleware import MarkdownForAgentsMiddleware
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -191,3 +194,44 @@ def test_nonconverted_responses_keep_headers_and_body(
     assert response.content == (
         gzip.decompress(body) if "Content-Encoding" in extra_headers else body
     )
+
+
+def test_trailer_response_passes_through_without_conversion_or_caching() -> None:
+    # Exercise ASGI directly: TestClient does not expose response trailers.
+    messages: list[Message] = [
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/html"), (b"trailer", b"x-checksum")],
+            "trailers": True,
+        },
+        {"type": "http.response.body", "body": b"<h1>Hello", "more_body": True},
+        {"type": "http.response.body", "body": b"</h1>", "more_body": False},
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-checksum", b"html-checksum")],
+            "more_trailers": False,
+        },
+    ]
+    sent: list[Message] = []
+    store = MemoryStore()
+
+    async def origin(scope: Scope, receive: Receive, send: Send) -> None:
+        for message in messages:
+            await send(message)
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(b"accept", b"text/markdown")],
+    }
+    asyncio.run(MarkdownForAgentsMiddleware(origin, store=store)(scope, receive, send))
+    assert sent == messages
+    assert store.get("/") is None

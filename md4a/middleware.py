@@ -89,11 +89,23 @@ class MarkdownForAgentsMiddleware:
 
         start: Message | None = None
         body_parts: list[bytes] = []
+        passthrough = False
 
         async def capture(message: Message) -> None:
-            nonlocal start
+            nonlocal start, passthrough
             if message["type"] == "http.response.start":
                 start = message
+                response_headers = Headers(raw=start["headers"])
+                # Forward all messages, including trailers, when the representation
+                # cannot be converted. Do not buffer compressed or partial content.
+                passthrough = (
+                    bool(start.get("trailers", False))
+                    or response_headers.get("content-encoding", "identity").lower() != "identity"
+                    or start["status"] == 206
+                    or "content-range" in response_headers
+                )
+            if passthrough:
+                await send(message)
             elif message["type"] == "http.response.body":
                 body_parts.append(message.get("body", b""))
                 if not message.get("more_body", False):
@@ -104,15 +116,6 @@ class MarkdownForAgentsMiddleware:
             response_headers = Headers(raw=start["headers"])
             media_type = response_headers.get("content-type", "").partition(";")[0].lower()
             body = b"".join(body_parts)
-            # Do not decode compressed bytes or transform only part of a representation.
-            if (
-                response_headers.get("content-encoding", "identity").lower() != "identity"
-                or start["status"] == 206
-                or "content-range" in response_headers
-            ):
-                await send(start)
-                await send({"type": "http.response.body", "body": body})
-                return
             if media_type == "text/markdown":
                 if 200 <= start["status"] < 300:
                     self.store.put(key, body.decode("utf-8"))

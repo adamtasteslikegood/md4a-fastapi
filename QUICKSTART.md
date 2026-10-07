@@ -97,7 +97,8 @@ The second response has `Content-Type: text/markdown; charset=utf-8` and
 HTML conversion preserves the application's security and other response headers,
 including repeated cookies. It replaces `Content-Type` and `Content-Length`,
 merges `Accept` into existing `Vary` fields, and drops validators and digests for
-the original HTML. Compressed and partial responses are not converted.
+the original HTML. Compressed, partial, and trailer-bearing responses are not
+converted.
 
 Cache hits and provider responses return before the route or any inner middleware
 runs. Their stores contain only Markdown text; md4a does not save or replay cookies

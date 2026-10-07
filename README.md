@@ -107,7 +107,8 @@ response types pass through unchanged.
 Converted responses retain application headers, including security headers, CORS,
 and repeated `Set-Cookie` fields. md4a recalculates the content type and length,
 merges `Accept` into `Vary`, and removes HTML-specific validators, digests, and
-range metadata. Compressed and partial responses pass through unchanged.
+range metadata. Compressed, partial, and trailer-bearing responses pass through
+unchanged.
 
 For headers that must be present on **every** response, register your security/CORS
 middleware **after** `add_md4a(app)` so it wraps md4a. Cache hits and provider
