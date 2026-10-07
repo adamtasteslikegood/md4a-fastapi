@@ -6,8 +6,25 @@ This guide gets the middleware or standalone service running locally.
 
 - Python 3.11 or newer
 - Git
+- Either [uv](https://docs.astral.sh/uv/) (recommended) or pip
 
 ## Set up a development environment
+
+Using uv (recommended):
+
+```bash
+git clone https://github.com/adamtasteslikegood/md4a-fastapi.git
+cd md4a-fastapi
+uv sync --extra test
+```
+
+This creates or updates `.venv`, installs the package in editable mode, and
+installs the test tools. No activation is needed when using `uv run`. If you
+prefer to activate the environment, use `source .venv/bin/activate` on
+macOS/Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell, then run
+commands without the `uv run` prefix.
+
+Using Python's built-in venv and pip:
 
 ```bash
 git clone https://github.com/adamtasteslikegood/md4a-fastapi.git
@@ -21,6 +38,13 @@ python -m pip install -e '.[test]'
 On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
 
 Confirm the installation:
+
+```bash
+uv run md4a -h
+uv run pytest -q
+```
+
+If you installed with pip, run the same checks directly:
 
 ```bash
 md4a -h
@@ -49,6 +73,12 @@ def hello() -> str:
 Run it:
 
 ```bash
+uv run uvicorn example:app --reload
+```
+
+With a pip installation, use:
+
+```bash
 uvicorn example:app --reload
 ```
 
@@ -61,6 +91,36 @@ curl -i -H 'Accept: text/markdown' http://127.0.0.1:8000/hello
 
 The second response has `Content-Type: text/markdown; charset=utf-8` and
 `Vary: Accept`.
+
+### Middleware ordering and response headers
+
+HTML conversion preserves the application's security and other response headers,
+including repeated cookies. It replaces `Content-Type` and `Content-Length`,
+merges `Accept` into existing `Vary` fields, and drops validators and digests for
+the original HTML. Compressed, partial, and trailer-bearing responses are not
+converted.
+
+Cache hits and provider responses return before the route or any inner middleware
+runs. Their stores contain only Markdown text; md4a does not save or replay cookies
+or other response headers. Register middleware that must run for every response
+after `add_md4a(app)` (the last registered middleware runs outermost):
+
+```python
+# Add this after add_md4a(app), before starting Uvicorn.
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+```
+
+This ordering applies to security-header, CORS, and authentication middleware.
+Use md4a's path/query-keyed cache only for public, non-personalized content;
+authentication dependencies on individual routes are bypassed by cache/provider
+responses. Request `/hello` twice with `Accept: text/markdown` to verify that both
+the converted response and cache hit carry the security headers.
 
 ## Serve hand-authored Markdown
 
@@ -88,14 +148,16 @@ The provider key includes the request path and, when present, its query string.
 Print verified Markdown to standard output:
 
 ```bash
-md4a fetch https://blog.cloudflare.com/the-agentic-internet/
+uv run md4a fetch https://blog.cloudflare.com/the-agentic-internet/
 ```
 
 Write it to a file:
 
 ```bash
-md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
+uv run md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.md
 ```
+
+With a pip installation, omit the `uv run` prefix from these commands.
 
 The command exits with status `2` when the page responds successfully but does
 not advertise `text/markdown`.
@@ -107,8 +169,10 @@ Restrict outbound requests to known hosts before exposing the service:
 ```bash
 export MD4A_ALLOWED_HOSTS=blog.cloudflare.com,developers.cloudflare.com
 export MD4A_CACHE_DIR=.md4a-cache
-md4a serve --host 127.0.0.1 --port 8000
+uv run md4a serve --host 127.0.0.1 --port 8000
 ```
+
+With a pip installation, run `md4a serve --host 127.0.0.1 --port 8000` instead.
 
 Then fetch through the API:
 
