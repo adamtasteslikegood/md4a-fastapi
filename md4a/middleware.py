@@ -11,6 +11,21 @@ from .store import MemoryStore, Store
 
 MarkdownProvider = Callable[[str], str | None]
 
+# These describe the original HTML bytes and cannot be reused after conversion.
+_HTML_REPRESENTATION_HEADERS = {
+    b"content-encoding",
+    b"content-location",
+    b"content-range",
+    b"accept-ranges",
+    b"etag",
+    b"last-modified",
+    b"content-md5",
+    b"digest",
+    b"content-digest",
+    b"repr-digest",
+    b"transfer-encoding",
+}
+
 
 def accepts_markdown(value: str) -> bool:
     """Return true when text/markdown is an accepted media range (q=0 excluded)."""
@@ -32,6 +47,10 @@ class MarkdownForAgentsMiddleware:
     Cached/provider content wins. Otherwise the normal FastAPI route executes and
     an HTML response is converted, cached by request path, and returned as Markdown.
     Non-GET and non-Markdown requests pass through unchanged.
+
+    Conversion preserves response headers except metadata tied to the HTML bytes.
+    Stores contain only content: security/auth middleware must wrap this middleware
+    to run on cache hits and provider responses as well as converted responses.
     """
 
     def __init__(
@@ -85,6 +104,15 @@ class MarkdownForAgentsMiddleware:
             response_headers = Headers(raw=start["headers"])
             media_type = response_headers.get("content-type", "").partition(";")[0].lower()
             body = b"".join(body_parts)
+            # Do not decode compressed bytes or transform only part of a representation.
+            if (
+                response_headers.get("content-encoding", "identity").lower() != "identity"
+                or start["status"] == 206
+                or "content-range" in response_headers
+            ):
+                await send(start)
+                await send({"type": "http.response.body", "body": body})
+                return
             if media_type == "text/markdown":
                 if 200 <= start["status"] < 300:
                     self.store.put(key, body.decode("utf-8"))
@@ -98,7 +126,9 @@ class MarkdownForAgentsMiddleware:
             ):
                 converted = markdownify(body.decode("utf-8"), heading_style="ATX")
                 self.store.put(key, converted)
-                await self._send_markdown(send, converted, status=start["status"])
+                await self._send_markdown(
+                    send, converted, status=start["status"], raw_headers=start["headers"]
+                )
             else:
                 await send(start)
                 await send({"type": "http.response.body", "body": body})
@@ -106,13 +136,35 @@ class MarkdownForAgentsMiddleware:
         await self.app(scope, receive, capture)
 
     @staticmethod
-    async def _send_markdown(send: Send, content: str, status: int = 200) -> None:
+    async def _send_markdown(
+        send: Send,
+        content: str,
+        status: int = 200,
+        *,
+        raw_headers: list[tuple[bytes, bytes]] | None = None,
+    ) -> None:
         body = content.encode("utf-8")
-        message: Message = {"type": "http.response.start", "status": status, "headers": []}
+        # Copy raw pairs so repeated fields (especially Set-Cookie) survive and
+        # neither the original response nor its mutable headers are modified.
+        message: Message = {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (name, value)
+                for name, value in (raw_headers or [])
+                if name.lower() not in _HTML_REPRESENTATION_HEADERS
+            ],
+        }
         headers = MutableHeaders(scope=message)
         headers["content-type"] = "text/markdown; charset=utf-8"
         headers["content-length"] = str(len(body))
-        headers["vary"] = "Accept"
+        vary = [item.strip() for value in headers.getlist("vary") for item in value.split(",")]
+        if "*" in vary:
+            headers["vary"] = "*"
+        else:
+            if "accept" not in {item.lower() for item in vary}:
+                vary.append("Accept")
+            headers["vary"] = ", ".join(item for item in vary if item)
         await send(message)
         await send({"type": "http.response.body", "body": body})
 

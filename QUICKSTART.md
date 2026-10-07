@@ -92,6 +92,35 @@ curl -i -H 'Accept: text/markdown' http://127.0.0.1:8000/hello
 The second response has `Content-Type: text/markdown; charset=utf-8` and
 `Vary: Accept`.
 
+### Middleware ordering and response headers
+
+HTML conversion preserves the application's security and other response headers,
+including repeated cookies. It replaces `Content-Type` and `Content-Length`,
+merges `Accept` into existing `Vary` fields, and drops validators and digests for
+the original HTML. Compressed and partial responses are not converted.
+
+Cache hits and provider responses return before the route or any inner middleware
+runs. Their stores contain only Markdown text; md4a does not save or replay cookies
+or other response headers. Register middleware that must run for every response
+after `add_md4a(app)` (the last registered middleware runs outermost):
+
+```python
+# Add this after add_md4a(app), before starting Uvicorn.
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+```
+
+This ordering applies to security-header, CORS, and authentication middleware.
+Use md4a's path/query-keyed cache only for public, non-personalized content;
+authentication dependencies on individual routes are bypassed by cache/provider
+responses. Request `/hello` twice with `Accept: text/markdown` to verify that both
+the converted response and cache hit carry the security headers.
+
 ## Serve hand-authored Markdown
 
 Use a provider when conversion is not the desired source of truth:
