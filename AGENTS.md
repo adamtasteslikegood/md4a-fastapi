@@ -78,6 +78,13 @@ redirects, allowlists, size limits, error paths, and storage behavior.
 - Preserve ordinary application responses when Markdown negotiation does not apply.
 - Do not convert or cache unsuccessful HTML responses as successful Markdown.
 - Preserve `Content-Type: text/markdown; charset=utf-8` and `Vary: Accept` semantics.
+- On HTML conversion, preserve application headers (including repeated cookies),
+  merge `Vary`, recalculate content headers, and discard HTML-specific validators,
+  digests, and range metadata. Pass encoded, partial, and trailer-bearing responses
+  through unchanged, including their original ASGI messages.
+- Content stores do not persist response headers. Register security/CORS/auth
+  middleware outside md4a so it runs on cache/provider shortcuts; route-level auth
+  is bypassed on those paths. Restrict path/query-keyed caches to public content.
 - Keep redirect validation active before each outbound request.
 - Treat remote fetching as SSRF-sensitive. Do not weaken scheme or host validation;
   deployments exposed to untrusted callers must set `MD4A_ALLOWED_HOSTS` and should

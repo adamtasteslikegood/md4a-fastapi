@@ -104,6 +104,19 @@ the middleware executes the normal route, converts a successful HTML response,
 caches it by path and query string, and responds as `text/markdown`. JSON and other
 response types pass through unchanged.
 
+Converted responses retain application headers, including security headers, CORS,
+and repeated `Set-Cookie` fields. md4a recalculates the content type and length,
+merges `Accept` into `Vary`, and removes HTML-specific validators, digests, and
+range metadata. Compressed, partial, and trailer-bearing responses pass through
+unchanged.
+
+For headers that must be present on **every** response, register your security/CORS
+middleware **after** `add_md4a(app)` so it wraps md4a. Cache hits and provider
+responses skip the wrapped application; stores hold Markdown text only, not
+response headers. Use caching for public, non-personalized content, and keep
+authentication outside md4a: route-level authentication does not run on these
+shortcuts. See [middleware ordering](QUICKSTART.md#middleware-ordering-and-response-headers).
+
 ## Remote discovery and standalone service
 
 With the uv-managed project environment, run the CLI with `uv run`:
