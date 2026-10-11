@@ -24,6 +24,7 @@ _HTML_REPRESENTATION_HEADERS = {
     b"content-digest",
     b"repr-digest",
     b"transfer-encoding",
+    b"trailer",
 }
 
 
@@ -100,7 +101,11 @@ class MarkdownForAgentsMiddleware:
                 # cannot be converted. Do not buffer compressed or partial content.
                 passthrough = (
                     bool(start.get("trailers", False))
-                    or response_headers.get("content-encoding", "identity").lower() != "identity"
+                    or any(
+                        coding.strip().lower() != "identity"
+                        for value in response_headers.getlist("content-encoding")
+                        for coding in value.split(",")
+                    )
                     or start["status"] == 206
                     or "content-range" in response_headers
                 )
