@@ -116,7 +116,8 @@ Required GitHub checks are:
 
 - `ci.yml` runs on PRs and pushes to `main` and `dev`, and on manual dispatch. It checks
   Ruff lint/format, tests Python 3.11–3.14, builds wheel/sdist artifacts, and runs Twine.
-- `codeql.yml` scans PRs and `main`, runs weekly, and supports manual dispatch.
+- `codeql.yml` scans PRs and pushes to `main` and `dev`, runs weekly, and supports manual
+  dispatch.
 - `dependabot.yml` checks pip and GitHub Actions dependencies every Monday.
 - GitHub vulnerability alerts, automated security updates, private vulnerability
   reporting, secret scanning, and protected-main checks are repository controls.
