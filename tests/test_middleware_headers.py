@@ -30,7 +30,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def test_conversion_preserves_response_headers_without_mutating_html() -> None:
+@pytest.mark.parametrize("encodings", [["identity"], ["identity", " Identity, identity "]])
+def test_conversion_preserves_response_headers_without_mutating_html(encodings: list[str]) -> None:
     app = FastAPI()
     original = HTMLResponse(
         "<h1>Café</h1>",
@@ -48,9 +49,11 @@ def test_conversion_preserves_response_headers_without_mutating_html() -> None:
             "Repr-Digest": "sha-256=:html-only:",
             "Accept-Ranges": "bytes",
             "Content-Location": "/page.html",
-            "Content-Encoding": "identity",
+            "Trailer": "x-checksum",
         },
     )
+    for encoding in encodings:
+        original.headers.append("Content-Encoding", encoding)
     original.set_cookie("first", "one", httponly=True)
     original.set_cookie("second", "two", secure=True)
     original.headers.append("Link", '</one>; rel="first"')
@@ -90,6 +93,7 @@ def test_conversion_preserves_response_headers_without_mutating_html() -> None:
         "Accept-Ranges",
         "Content-Location",
         "Content-Encoding",
+        "Trailer",
     ):
         assert name not in markdown.headers
         assert name in html.headers
@@ -196,6 +200,32 @@ def test_nonconverted_responses_keep_headers_and_body(
     )
 
 
+@pytest.mark.parametrize(
+    "encodings",
+    [
+        [b"identity", b"gzip"],
+        [b"gzip", b"identity"],
+        [b"identity, gzip"],
+        [b"identity", b" identity, GZip "],
+    ],
+)
+def test_encoded_response_passes_through_without_conversion_or_caching(
+    encodings: list[bytes],
+) -> None:
+    body = gzip.compress(b"<h1>Hello</h1>")
+    messages: list[Message] = [
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/html")]
+            + [(b"content-encoding", value) for value in encodings],
+        },
+        {"type": "http.response.body", "body": body[:8], "more_body": True},
+        {"type": "http.response.body", "body": body[8:], "more_body": False},
+    ]
+    _assert_asgi_passthrough(messages)
+
+
 def test_trailer_response_passes_through_without_conversion_or_caching() -> None:
     # Exercise ASGI directly: TestClient does not expose response trailers.
     messages: list[Message] = [
@@ -213,6 +243,10 @@ def test_trailer_response_passes_through_without_conversion_or_caching() -> None
             "more_trailers": False,
         },
     ]
+    _assert_asgi_passthrough(messages)
+
+
+def _assert_asgi_passthrough(messages: list[Message]) -> None:
     sent: list[Message] = []
     store = MemoryStore()
 
