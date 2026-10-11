@@ -143,7 +143,8 @@ class MarkdownForAgentsMiddleware:
                 )
                 if passthrough:
                     await send(message)
-            elif passthrough:
+            elif passthrough or start is None:
+                # Extension messages may precede the start (for example debug).
                 await send(message)
             elif message["type"] == "http.response.body":
                 body = message.get("body", b"")

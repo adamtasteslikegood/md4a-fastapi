@@ -123,3 +123,15 @@ def test_unbufferable_message_while_buffering_is_passed_through() -> None:
 
     assert sent == messages
     assert store.get("/") is None
+
+
+def test_message_before_response_start_is_forwarded_and_response_still_converted() -> None:
+    # Starlette template responses emit http.response.debug before the start message.
+    debug: Message = {"type": "http.response.debug", "info": {"template": "page.html"}}
+
+    sent, _, store = _run([debug, _start(b"text/html"), *_body(b"<p>abc</p>")])
+
+    assert sent[0] == debug
+    assert (b"content-type", b"text/markdown; charset=utf-8") in sent[1]["headers"]
+    assert _sent_body(sent).strip() == b"abc"
+    assert store.get("/") is not None
