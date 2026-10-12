@@ -113,7 +113,9 @@ unchanged.
 Only successful HTML and Markdown responses are buffered, up to `max_html_bytes`
 (5 MB by default, set on `MarkdownForAgentsMiddleware`). Everything else, including
 streaming responses and bodies over the limit, is forwarded as it arrives and is
-neither converted nor cached.
+neither converted nor cached. Bodies are decoded with the charset declared in
+`Content-Type` (UTF-8 when absent); a response that cannot be decoded is returned
+unchanged and is not cached.
 
 For headers that must be present on **every** response, register your security/CORS
 middleware **after** `add_md4a(app)` so it wraps md4a. Cache hits and provider

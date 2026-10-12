@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from email.message import Message as EmailMessage
 
 from fastapi import FastAPI
 from markdownify import markdownify
@@ -33,6 +34,13 @@ def _declared_length(headers: Headers) -> int:
         return int(headers.get("content-length", "0"))
     except ValueError:
         return 0
+
+
+def _declared_charset(headers: Headers) -> str:
+    # Quote-aware: a ";" inside a quoted parameter value does not start a parameter.
+    message = EmailMessage()
+    message["content-type"] = headers.get("content-type", "")
+    return message.get_content_charset() or "utf-8"
 
 
 def accepts_markdown(value: str) -> bool:
@@ -164,12 +172,20 @@ class MarkdownForAgentsMiddleware:
         async def finish() -> None:
             assert start is not None
             body = b"".join(body_parts)
-            if media_type == "text/markdown":
-                self.store.put(key, body.decode("utf-8"))
+            try:
+                text = body.decode(_declared_charset(Headers(raw=start["headers"])))
+                # Some codecs decode to lone surrogates, which cannot be served or stored.
+                text.encode("utf-8")
+            except (LookupError, UnicodeError):
+                text = None
+            if text is None or media_type == "text/markdown":
+                # Undecodable content is returned as the application sent it, uncached.
+                if text is not None:
+                    self.store.put(key, text)
                 await send(start)
                 await send({"type": "http.response.body", "body": body})
                 return
-            converted = markdownify(body.decode("utf-8"), heading_style="ATX")
+            converted = markdownify(text, heading_style="ATX")
             self.store.put(key, converted)
             await self._send_markdown(
                 send, converted, status=start["status"], raw_headers=start["headers"]
