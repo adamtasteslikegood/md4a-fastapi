@@ -110,6 +110,11 @@ merges `Accept` into `Vary`, and removes HTML-specific validators, digests, and
 range metadata. Compressed, partial, and trailer-bearing responses pass through
 unchanged.
 
+Only successful HTML and Markdown responses are buffered, up to `max_html_bytes`
+(5 MB by default, set on `MarkdownForAgentsMiddleware`). Everything else, including
+streaming responses and bodies over the limit, is forwarded as it arrives and is
+neither converted nor cached.
+
 For headers that must be present on **every** response, register your security/CORS
 middleware **after** `add_md4a(app)` so it wraps md4a. Cache hits and provider
 responses skip the wrapped application; stores hold Markdown text only, not
