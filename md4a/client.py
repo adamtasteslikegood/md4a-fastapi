@@ -4,6 +4,7 @@ import asyncio
 import ipaddress
 import socket
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -33,6 +34,88 @@ def _is_public(value: str) -> bool:
     return address.is_global and not address.is_multicast
 
 
+def _literal_address(host: str) -> str | None:
+    """Return the address a host spells, or None when it is a name to resolve."""
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        pass
+    try:
+        # Forms such as 127.1, 2130706433, and 0x7f000001 are addresses to libc.
+        return socket.inet_ntoa(socket.inet_aton(host))
+    except (OSError, UnicodeError):
+        return None
+
+
+def _exclusion_matches(pattern: httpx.URL, url: httpx.URL) -> bool:
+    if pattern.scheme != "all" and pattern.scheme != url.scheme:
+        return False
+    if pattern.port is not None and pattern.port != url.port:
+        return False
+    host = pattern.host
+    if host in ("", "*"):
+        return True
+    if host.startswith("*."):
+        return url.host.endswith(host[1:]) and len(url.host) > len(host) - 1
+    if host.startswith("*"):
+        return url.host == host[1:] or url.host.endswith(f".{host[1:]}")
+    return url.host == host
+
+
+def _environment_proxy(url: httpx.URL) -> str | None:
+    """Return the environment proxy httpx would send this URL through, if any.
+
+    md4a routes requests itself, so it has to make this decision; it follows
+    httpx's reading of the proxy variables (httpx._utils.get_environment_proxies).
+    """
+    settings = urllib.request.getproxies()
+    rules: dict[str, str | None] = {}
+    for scheme in ("http", "https", "all"):
+        proxy = settings.get(scheme)
+        if proxy:
+            rules[f"{scheme}://"] = proxy if "://" in proxy else f"http://{proxy}"
+    for entry in (item.strip() for item in settings.get("no", "").split(",")):
+        if entry == "*":
+            return None
+        if not entry:
+            continue
+        address = entry.split("/")[0]
+        if "://" in entry:
+            rules[entry] = None
+        elif _parses(ipaddress.IPv4Address, address) or entry.lower() == "localhost":
+            rules[f"all://{entry}"] = None
+        elif _parses(ipaddress.IPv6Address, address):
+            rules[f"all://[{entry}]"] = None
+        else:
+            rules[f"all://*{entry}"] = None
+
+    chosen: tuple[tuple[int, int, int], str | None] | None = None
+    for key, proxy in rules.items():
+        try:
+            pattern = httpx.URL(key)
+        except httpx.InvalidURL:
+            continue
+        if not _exclusion_matches(pattern, url):
+            continue
+        # The most specific rule wins: a port, then the longer host, then a scheme.
+        priority = (
+            pattern.port is None,
+            -len("" if pattern.host == "*" else pattern.host),
+            -len("" if pattern.scheme == "all" else pattern.scheme),
+        )
+        if chosen is None or priority < chosen[0]:
+            chosen = (priority, proxy)
+    return chosen[1] if chosen else None
+
+
+def _parses(kind: type, value: str) -> bool:
+    try:
+        kind(value)
+    except ValueError:
+        return False
+    return True
+
+
 class _RoutingTransport(httpx.AsyncBaseTransport):
     """Send each request where md4a decided it goes: a proxy, or a checked address.
 
@@ -40,10 +123,15 @@ class _RoutingTransport(httpx.AsyncBaseTransport):
     resolving the name again. Only the connection target changes: the hostname is
     kept for Host, SNI, and certificate verification, and the client still sees the
     original URL, so redirects and cookies stay scoped to the hostname.
+
+    Each hostname gets its own direct transport. A connection pool only sees the
+    pinned address, so sharing one would let a hostname reuse a connection whose
+    certificate was verified for a different hostname at the same address.
     """
 
-    def __init__(self, direct: httpx.AsyncBaseTransport) -> None:
-        self._direct = direct
+    def __init__(self, direct_transport: Callable[[], httpx.AsyncBaseTransport]) -> None:
+        self._direct_transport = direct_transport
+        self._direct: dict[str, httpx.AsyncBaseTransport] = {}
         self._proxies: dict[str, httpx.AsyncBaseTransport] = {}
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -55,7 +143,11 @@ class _RoutingTransport(httpx.AsyncBaseTransport):
         addresses = request.extensions.get(_ADDRESSES)
         if not addresses:
             raise ValueError("refusing to send a request whose destination was not checked")
-        extensions = {**request.extensions, "sni_hostname": request.url.raw_host.decode("ascii")}
+        hostname = request.url.raw_host.decode("ascii")
+        if hostname not in self._direct:
+            self._direct[hostname] = self._direct_transport()
+        direct = self._direct[hostname]
+        extensions = {**request.extensions, "sni_hostname": hostname}
         for index, address in enumerate(addresses):
             pinned = httpx.Request(
                 request.method,
@@ -65,7 +157,7 @@ class _RoutingTransport(httpx.AsyncBaseTransport):
                 extensions=extensions,
             )
             try:
-                return await self._direct.handle_async_request(pinned)
+                return await direct.handle_async_request(pinned)
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 # Nothing was sent, so the next validated address can be tried.
                 if index == len(addresses) - 1:
@@ -73,8 +165,9 @@ class _RoutingTransport(httpx.AsyncBaseTransport):
         raise AssertionError("unreachable")
 
     async def aclose(self) -> None:
-        await self._direct.aclose()
-        for transport in self._proxies.values():
+        # A supplied transport is handed out for every hostname; close it once.
+        transports = [*self._direct.values(), *self._proxies.values()]
+        for transport in {id(transport): transport for transport in transports}.values():
             await transport.aclose()
 
 
@@ -117,34 +210,24 @@ class MarkdownForAgentsClient:
             raise ValueError(f"host is not allowed: {parsed.hostname}")
 
     def _direct_transport(self) -> httpx.AsyncBaseTransport:
+        """Return the transport for one hostname's direct connections."""
         return self.transport or httpx.AsyncHTTPTransport()
 
     def _proxy_for(self, url: httpx.URL) -> str | None:
         """Return the environment proxy this URL goes through, if any.
 
-        md4a routes requests itself, so this is the only place that decides it;
-        an explicitly supplied transport is never proxied.
+        An explicitly supplied transport is never proxied.
         """
-        if self.transport is not None:
-            return None
-        proxies = urllib.request.getproxies()
-        proxy = proxies.get(url.scheme) or proxies.get("all")
-        if not proxy:
-            return None
-        port = url.port or (443 if url.scheme == "https" else 80)
-        host = url.raw_host.decode("ascii")
-        # Exclusions may name a host or a host:port pair.
-        if urllib.request.proxy_bypass(host) or urllib.request.proxy_bypass(f"{host}:{port}"):
-            return None
-        return proxy if "://" in proxy else f"http://{proxy}"
+        return None if self.transport is not None else _environment_proxy(url)
 
     async def _route(self, url: str) -> dict[str, object]:
         """Refuse a non-public destination; return how the request must be sent."""
         target = httpx.URL(url)
         host = target.raw_host.decode("ascii")
-        try:
-            addresses = [str(ipaddress.ip_address(host))]
-        except ValueError:
+        literal = _literal_address(host)
+        if literal is not None:
+            addresses = [literal]
+        else:
             proxy = self._proxy_for(target)
             if proxy is not None:
                 # The proxy resolves the name, so there is no address to check or pin.
@@ -171,7 +254,7 @@ class MarkdownForAgentsClient:
             transport=(
                 self.transport
                 if self.allow_private_addresses
-                else _RoutingTransport(self._direct_transport())
+                else _RoutingTransport(self._direct_transport)
             ),
             headers={"Accept": MARKDOWN_ACCEPT, "User-Agent": f"md4a/{__version__}"},
         ) as client:

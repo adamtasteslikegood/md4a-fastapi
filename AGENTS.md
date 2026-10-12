@@ -89,6 +89,8 @@ redirects, allowlists, size limits, error paths, and storage behavior.
 - Keep redirect validation active before each outbound request.
 - The remote client rejects non-public destination addresses and connects to the
   address it validated; keep that check on every hop and keep the opt-out explicit.
+  Direct connections use one transport per hostname, because a pool only sees the
+  pinned address; md4a decides proxy-versus-direct itself, following httpx's rules.
 - Treat remote fetching as SSRF-sensitive. Do not weaken scheme or host validation;
   deployments exposed to untrusted callers must set `MD4A_ALLOWED_HOSTS` and should
   also enforce network-level egress controls.

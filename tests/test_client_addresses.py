@@ -57,6 +57,11 @@ def _assert_blocked(url: str, handler: object = _markdown) -> list[httpx.Request
         "[::ffff:127.0.0.1]",
         "[64:ff9b::7f00:1]",
         "[2002:7f00:1::]",
+        # Spellings that libc-style parsers, including proxies, read as 127.0.0.1.
+        "127.1",
+        "2130706433",
+        "0x7f000001",
+        "017700000001",
     ],
 )
 def test_literal_non_public_address_is_rejected_without_a_request(host: str) -> None:
@@ -285,6 +290,16 @@ def test_literal_private_address_is_rejected_behind_a_proxy(
     assert isinstance(error, ValueError) and "not a public address" in str(error)
 
 
+@pytest.mark.parametrize("host", ["127.1", "2130706433", "0x7f000001"])
+def test_alternative_address_spelling_is_rejected_behind_a_proxy(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    lines, error = _fetch_through_proxy(monkeypatch, f"https://{host}/page")
+
+    assert lines == []
+    assert isinstance(error, ValueError) and "not a public address" in str(error)
+
+
 def test_host_bypassing_the_proxy_is_still_resolved_and_checked(
     monkeypatch: pytest.MonkeyPatch, dns: dict[str, list[str]]
 ) -> None:
@@ -360,3 +375,93 @@ def test_connection_error_is_raised_when_no_validated_address_can_be_reached(
 
     with pytest.raises(httpx.ConnectError):
         _fetch("https://multi.example/page", handler)
+
+
+@pytest.mark.parametrize("no_proxy", ["*,localhost", "https://example.com", ".com"])
+def test_proxy_exclusion_forms_understood_by_httpx_connect_directly(
+    monkeypatch: pytest.MonkeyPatch, no_proxy: str
+) -> None:
+    lines, error = _fetch_through_proxy(monkeypatch, "https://example.com/page", no_proxy=no_proxy)
+
+    assert error is None and lines == []
+    assert [str(request.url) for request in DIRECT_REQUESTS] == [f"https://{PUBLIC_ADDRESS}/page"]
+
+
+@pytest.mark.parametrize(
+    "no_proxy",
+    [
+        "",
+        "*",
+        "localhost, *",
+        "example.com",
+        ".example.com",
+        "ample.com",
+        "com",
+        "example.com:443",
+        "example.com:8443",
+        "https://example.com",
+        "http://example.com",
+        "all://*.example.com",
+        "93.184.216.34",
+        "10.0.0.0/8",
+        "::1",
+        "localhost",
+    ],
+)
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/page",
+        "http://example.com/page",
+        "https://www.example.com/page",
+        "https://example.com:8443/page",
+        "https://93.184.216.34/page",
+        "https://[::1]/page",
+        "http://localhost/page",
+    ],
+)
+def test_proxy_decision_matches_httpx(
+    monkeypatch: pytest.MonkeyPatch, no_proxy: str, url: str
+) -> None:
+    for name in PROXY_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("ALL_PROXY", "127.0.0.1:9")
+    monkeypatch.setenv("NO_PROXY", no_proxy)
+    probe = httpx.AsyncClient()
+    expected = probe._transport_for_url(httpx.URL(url)) is not probe._transport
+
+    assert (MarkdownForAgentsClient()._proxy_for(httpx.URL(url)) is not None) == expected
+
+
+def test_hostnames_sharing_an_address_do_not_share_connections(
+    monkeypatch: pytest.MonkeyPatch, dns: dict[str, list[str]]
+) -> None:
+    # A pooled connection is keyed by the pinned address, and its certificate was
+    # only verified for the hostname it was opened for.
+    dns["other.example"] = [PUBLIC_ADDRESS]
+    seen: list[tuple[int, str]] = []
+    created: list[httpx.MockTransport] = []
+
+    def direct_transport(self: MarkdownForAgentsClient) -> httpx.MockTransport:
+        index = len(created)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append((index, request.headers["host"]))
+            hops = {"/a": "https://other.example/b", "/b": "https://example.com/c"}
+            if request.url.path in hops:
+                return httpx.Response(302, headers={"location": hops[request.url.path]})
+            return _markdown(request)
+
+        created.append(httpx.MockTransport(handler))
+        return created[-1]
+
+    monkeypatch.setattr(MarkdownForAgentsClient, "_direct_transport", direct_transport)
+    for name in PROXY_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+
+    asyncio.run(MarkdownForAgentsClient().fetch("https://example.com/a"))
+
+    assert seen == [(0, "example.com"), (1, "other.example"), (0, "example.com")]
