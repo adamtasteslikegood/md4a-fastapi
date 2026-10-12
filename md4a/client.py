@@ -14,7 +14,8 @@ from . import __version__
 MARKDOWN_ACCEPT = "text/markdown"
 
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
-_ADDRESS = "md4a.address"
+_ADDRESSES = "md4a.addresses"
+_PROXY = "md4a.proxy"
 
 
 def _is_public(value: str) -> bool:
@@ -32,34 +33,49 @@ def _is_public(value: str) -> bool:
     return address.is_global and not address.is_multicast
 
 
-class _PinnedTransport(httpx.AsyncBaseTransport):
-    """Connect to the address that was checked instead of resolving the name again.
+class _RoutingTransport(httpx.AsyncBaseTransport):
+    """Send each request where md4a decided it goes: a proxy, or a checked address.
 
-    Only the connection target changes: the hostname is kept for Host, SNI, and
-    certificate verification, and the client still sees the original URL, so
-    redirects and cookies stay scoped to the hostname.
+    Direct requests connect to the addresses that were validated instead of
+    resolving the name again. Only the connection target changes: the hostname is
+    kept for Host, SNI, and certificate verification, and the client still sees the
+    original URL, so redirects and cookies stay scoped to the hostname.
     """
 
-    def __init__(self, transport: httpx.AsyncBaseTransport) -> None:
-        self._transport = transport
+    def __init__(self, direct: httpx.AsyncBaseTransport) -> None:
+        self._direct = direct
+        self._proxies: dict[str, httpx.AsyncBaseTransport] = {}
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        address = request.extensions.get(_ADDRESS)
-        if address is not None:
-            request = httpx.Request(
+        proxy = request.extensions.get(_PROXY)
+        if proxy is not None:
+            if proxy not in self._proxies:
+                self._proxies[proxy] = httpx.AsyncHTTPTransport(proxy=proxy)
+            return await self._proxies[proxy].handle_async_request(request)
+        addresses = request.extensions.get(_ADDRESSES)
+        if not addresses:
+            raise ValueError("refusing to send a request whose destination was not checked")
+        extensions = {**request.extensions, "sni_hostname": request.url.raw_host.decode("ascii")}
+        for index, address in enumerate(addresses):
+            pinned = httpx.Request(
                 request.method,
                 request.url.copy_with(host=address),
                 headers=request.headers,
                 stream=request.stream,
-                extensions={
-                    **request.extensions,
-                    "sni_hostname": request.url.raw_host.decode("ascii"),
-                },
+                extensions=extensions,
             )
-        return await self._transport.handle_async_request(request)
+            try:
+                return await self._direct.handle_async_request(pinned)
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                # Nothing was sent, so the next validated address can be tried.
+                if index == len(addresses) - 1:
+                    raise
+        raise AssertionError("unreachable")
 
     async def aclose(self) -> None:
-        await self._transport.aclose()
+        await self._direct.aclose()
+        for transport in self._proxies.values():
+            await transport.aclose()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,39 +116,39 @@ class MarkdownForAgentsClient:
         if self.allowed_hosts is not None and parsed.hostname not in self.allowed_hosts:
             raise ValueError(f"host is not allowed: {parsed.hostname}")
 
-    def _proxied(self, url: httpx.URL) -> bool:
-        """Return true when httpx will send this URL through an environment proxy."""
-        if self.transport is not None:
-            # httpx ignores environment proxies when it is given a transport.
-            return False
-        proxies = urllib.request.getproxies()
-        if not (proxies.get(url.scheme) or proxies.get("all")):
-            return False
-        return not urllib.request.proxy_bypass(url.host)
+    def _direct_transport(self) -> httpx.AsyncBaseTransport:
+        return self.transport or httpx.AsyncHTTPTransport()
 
-    def _client_transport(self) -> httpx.AsyncBaseTransport | None:
-        if self.allow_private_addresses:
-            return self.transport
-        if self.transport is not None:
-            return _PinnedTransport(self.transport)
-        proxies = urllib.request.getproxies()
-        if any(proxies.get(scheme) for scheme in ("http", "https", "all")):
-            # Leave proxy routing to httpx. A proxy resolves names itself and is
-            # addressed by hostname, so connections through it cannot be pinned.
-            return None
-        return _PinnedTransport(httpx.AsyncHTTPTransport())
+    def _proxy_for(self, url: httpx.URL) -> str | None:
+        """Return the environment proxy this URL goes through, if any.
 
-    async def _checked_address(self, url: str) -> str | None:
-        """Refuse a non-public destination; return the address to connect to, if known."""
-        if self.allow_private_addresses:
+        md4a routes requests itself, so this is the only place that decides it;
+        an explicitly supplied transport is never proxied.
+        """
+        if self.transport is not None:
             return None
+        proxies = urllib.request.getproxies()
+        proxy = proxies.get(url.scheme) or proxies.get("all")
+        if not proxy:
+            return None
+        port = url.port or (443 if url.scheme == "https" else 80)
+        host = url.raw_host.decode("ascii")
+        # Exclusions may name a host or a host:port pair.
+        if urllib.request.proxy_bypass(host) or urllib.request.proxy_bypass(f"{host}:{port}"):
+            return None
+        return proxy if "://" in proxy else f"http://{proxy}"
+
+    async def _route(self, url: str) -> dict[str, object]:
+        """Refuse a non-public destination; return how the request must be sent."""
         target = httpx.URL(url)
         host = target.raw_host.decode("ascii")
         try:
             addresses = [str(ipaddress.ip_address(host))]
         except ValueError:
-            if self._proxied(target):
-                return None
+            proxy = self._proxy_for(target)
+            if proxy is not None:
+                # The proxy resolves the name, so there is no address to check or pin.
+                return {_PROXY: proxy}
             try:
                 async with asyncio.timeout(self.timeout):
                     found = await asyncio.get_running_loop().getaddrinfo(
@@ -140,26 +156,30 @@ class MarkdownForAgentsClient:
                     )
             except (OSError, TimeoutError) as exc:
                 raise httpx.ConnectError(f"could not resolve host: {host}") from exc
-            addresses = [str(item[4][0]) for item in found]
+            addresses = list(dict.fromkeys(str(item[4][0]) for item in found))
         if not addresses or not all(_is_public(address) for address in addresses):
             raise ValueError(f"host is not a public address: {host}")
-        return addresses[0]
+        proxy = self._proxy_for(target)
+        return {_PROXY: proxy} if proxy is not None else {_ADDRESSES: addresses}
 
     async def fetch(self, url: str) -> FetchResult:
         self._validate_url(url)
         async with httpx.AsyncClient(
             follow_redirects=False,
             timeout=self.timeout,
-            transport=self._client_transport(),
+            # With the check off, httpx routes and resolves as it normally would.
+            transport=(
+                self.transport
+                if self.allow_private_addresses
+                else _RoutingTransport(self._direct_transport())
+            ),
             headers={"Accept": MARKDOWN_ACCEPT, "User-Agent": f"md4a/{__version__}"},
         ) as client:
             current_url = url
             for _ in range(11):
                 self._validate_url(current_url)
-                address = await self._checked_address(current_url)
-                request = client.build_request(
-                    "GET", current_url, extensions={_ADDRESS: address} if address else {}
-                )
+                route = {} if self.allow_private_addresses else await self._route(current_url)
+                request = client.build_request("GET", current_url, extensions=route)
                 response = await client.send(request, stream=True)
                 if response.is_redirect:
                     redirect = response.next_request

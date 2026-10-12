@@ -218,12 +218,29 @@ def test_cookie_is_sent_back_to_the_host_that_set_it() -> None:
 
 
 PROXY_VARIABLES = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"]
+DIRECT_REQUESTS: list[httpx.Request] = []
 
 
 def _fetch_through_proxy(
     monkeypatch: pytest.MonkeyPatch, url: str, *, no_proxy: str = ""
 ) -> tuple[list[str], BaseException | None]:
-    """Fetch with HTTPS_PROXY pointing at a local listener; return what it was asked for."""
+    """Fetch with HTTPS_PROXY pointing at a local listener; return what it was asked for.
+
+    Requests that do not go to the proxy are answered by a stand-in for the direct
+    transport and recorded in ``DIRECT_REQUESTS``, so nothing leaves the machine.
+    """
+    DIRECT_REQUESTS.clear()
+
+    def direct(request: httpx.Request) -> httpx.Response:
+        DIRECT_REQUESTS.append(request)
+        return _markdown(request)
+
+    monkeypatch.setattr(
+        MarkdownForAgentsClient,
+        "_direct_transport",
+        lambda self: httpx.MockTransport(direct),
+        raising=False,
+    )
     for name in PROXY_VARIABLES:
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
@@ -279,3 +296,67 @@ def test_host_bypassing_the_proxy_is_still_resolved_and_checked(
 
     assert lines == []
     assert isinstance(error, ValueError) and "not a public address" in str(error)
+
+
+def test_port_qualified_proxy_bypass_is_resolved_and_checked(
+    monkeypatch: pytest.MonkeyPatch, dns: dict[str, list[str]]
+) -> None:
+    dns["internal.example"] = ["10.0.0.5"]
+
+    lines, error = _fetch_through_proxy(
+        monkeypatch, "https://internal.example:8443/page", no_proxy="internal.example:8443"
+    )
+
+    assert lines == [] and DIRECT_REQUESTS == []
+    assert isinstance(error, ValueError) and "not a public address" in str(error)
+
+
+def test_host_bypassing_the_proxy_connects_to_the_validated_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines, error = _fetch_through_proxy(
+        monkeypatch, "https://example.com/page", no_proxy="example.com"
+    )
+
+    assert error is None and lines == []
+    assert [str(request.url) for request in DIRECT_REQUESTS] == [f"https://{PUBLIC_ADDRESS}/page"]
+    assert DIRECT_REQUESTS[0].headers["host"] == "example.com"
+
+
+def test_unproxied_scheme_connects_to_the_validated_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Only HTTPS_PROXY is set, so plain HTTP goes direct and must stay pinned.
+    lines, error = _fetch_through_proxy(monkeypatch, "http://example.com/page")
+
+    assert error is None and lines == []
+    assert [str(request.url) for request in DIRECT_REQUESTS] == [f"http://{PUBLIC_ADDRESS}/page"]
+
+
+def test_next_validated_address_is_tried_when_one_cannot_be_reached(
+    dns: dict[str, list[str]],
+) -> None:
+    dns["multi.example"] = ["2606:4700::1111", PUBLIC_ADDRESS]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host != PUBLIC_ADDRESS:
+            raise httpx.ConnectError("unreachable", request=request)
+        return _markdown(request)
+
+    result, requests = _fetch("https://multi.example/page", handler)
+
+    assert [request.url.host for request in requests] == ["2606:4700::1111", PUBLIC_ADDRESS]
+    assert result.markdown == "# Page"
+    assert result.final_url == "https://multi.example/page"
+
+
+def test_connection_error_is_raised_when_no_validated_address_can_be_reached(
+    dns: dict[str, list[str]],
+) -> None:
+    dns["multi.example"] = ["2606:4700::1111", PUBLIC_ADDRESS]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("unreachable", request=request)
+
+    with pytest.raises(httpx.ConnectError):
+        _fetch("https://multi.example/page", handler)
