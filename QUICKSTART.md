@@ -160,7 +160,16 @@ uv run md4a fetch https://blog.cloudflare.com/the-agentic-internet/ -o article.m
 With a pip installation, omit the `uv run` prefix from these commands.
 
 The command exits with status `2` when the page responds successfully but does
-not advertise `text/markdown`.
+not advertise `text/markdown`, and with status `1` when the request fails or is
+rejected. It writes only to standard output or the `-o` file.
+
+Restrict and bound the request with `--allowed-host` (repeatable; defaults to
+`MD4A_ALLOWED_HOSTS`), `--timeout`, and `--max-bytes`:
+
+```bash
+uv run md4a fetch https://blog.cloudflare.com/the-agentic-internet/ \
+  --allowed-host blog.cloudflare.com --timeout 10 --max-bytes 1000000
+```
 
 ## Run the standalone API
 
