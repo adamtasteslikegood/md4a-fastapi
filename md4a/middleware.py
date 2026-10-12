@@ -233,6 +233,7 @@ def add_md4a(
     store: Store | None = None,
     provider: MarkdownProvider | None = None,
     convert_html: bool = True,
+    max_html_bytes: int = 5_000_000,
 ) -> None:
     """Add Markdown-for-Agents negotiation to an existing FastAPI app."""
     app.add_middleware(
@@ -240,4 +241,5 @@ def add_md4a(
         store=store,
         provider=provider,
         convert_html=convert_html,
+        max_html_bytes=max_html_bytes,
     )
