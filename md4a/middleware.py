@@ -35,6 +35,14 @@ def _declared_length(headers: Headers) -> int:
         return 0
 
 
+def _declared_charset(headers: Headers) -> str:
+    for parameter in headers.get("content-type", "").split(";")[1:]:
+        name, _, value = parameter.partition("=")
+        if name.strip().lower() == "charset":
+            return value.strip().strip('"') or "utf-8"
+    return "utf-8"
+
+
 def accepts_markdown(value: str) -> bool:
     """Return true when text/markdown is an accepted media range (q=0 excluded)."""
     for item in value.lower().split(","):
@@ -164,12 +172,18 @@ class MarkdownForAgentsMiddleware:
         async def finish() -> None:
             assert start is not None
             body = b"".join(body_parts)
-            if media_type == "text/markdown":
-                self.store.put(key, body.decode("utf-8"))
+            try:
+                text = body.decode(_declared_charset(Headers(raw=start["headers"])))
+            except (LookupError, UnicodeDecodeError):
+                text = None
+            if text is None or media_type == "text/markdown":
+                # Undecodable content is returned as the application sent it, uncached.
+                if text is not None:
+                    self.store.put(key, text)
                 await send(start)
                 await send({"type": "http.response.body", "body": body})
                 return
-            converted = markdownify(body.decode("utf-8"), heading_style="ATX")
+            converted = markdownify(text, heading_style="ATX")
             self.store.put(key, converted)
             await self._send_markdown(
                 send, converted, status=start["status"], raw_headers=start["headers"]
