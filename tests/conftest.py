@@ -14,7 +14,11 @@ def dns(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
     """
     records: dict[str, list[str]] = {"example.com": [PUBLIC_ADDRESS]}
 
-    def getaddrinfo(host: str, port: Any, *args: Any, **kwargs: Any) -> list[tuple[Any, ...]]:
+    def getaddrinfo(
+        host: str | bytes, port: Any, *args: Any, **kwargs: Any
+    ) -> list[tuple[Any, ...]]:
+        if isinstance(host, bytes):
+            host = host.decode("ascii")
         if host not in records:
             raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
         return [

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import socket
 import urllib.request
@@ -8,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+import anyio
 import httpx
 
 from . import __version__
@@ -15,6 +15,7 @@ from . import __version__
 MARKDOWN_ACCEPT = "text/markdown"
 
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
+_IPV6_GLOBAL_UNICAST = ipaddress.ip_network("2000::/3")
 _ADDRESSES = "md4a.addresses"
 _PROXY = "md4a.proxy"
 
@@ -31,6 +32,9 @@ def _is_public(value: str) -> bool:
             embedded = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
         if embedded is not None:
             address = embedded
+        elif address not in _IPV6_GLOBAL_UNICAST:
+            # ipaddress calls some ranges outside it global, such as site-local fec0::/10.
+            return False
     return address.is_global and not address.is_multicast
 
 
@@ -233,10 +237,8 @@ class MarkdownForAgentsClient:
                 # The proxy resolves the name, so there is no address to check or pin.
                 return {_PROXY: proxy}
             try:
-                async with asyncio.timeout(self.timeout):
-                    found = await asyncio.get_running_loop().getaddrinfo(
-                        host, None, type=socket.SOCK_STREAM
-                    )
+                with anyio.fail_after(self.timeout):
+                    found = await anyio.getaddrinfo(host, None, type=socket.SOCK_STREAM)
             except (OSError, TimeoutError) as exc:
                 raise httpx.ConnectError(f"could not resolve host: {host}") from exc
             addresses = list(dict.fromkeys(str(item[4][0]) for item in found))

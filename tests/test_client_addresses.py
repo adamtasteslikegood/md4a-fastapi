@@ -1,5 +1,6 @@
 import asyncio
 
+import anyio
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -57,6 +58,10 @@ def _assert_blocked(url: str, handler: object = _markdown) -> list[httpx.Request
         "[::ffff:127.0.0.1]",
         "[64:ff9b::7f00:1]",
         "[2002:7f00:1::]",
+        # Outside the global unicast block, whatever ipaddress says about them.
+        "[fec0::1]",
+        "[4000::1]",
+        "[5f00::1]",
         # Spellings that libc-style parsers, including proxies, read as 127.0.0.1.
         "127.1",
         "2130706433",
@@ -465,3 +470,18 @@ def test_hostnames_sharing_an_address_do_not_share_connections(
     asyncio.run(MarkdownForAgentsClient().fetch("https://example.com/a"))
 
     assert seen == [(0, "example.com"), (1, "other.example"), (0, "example.com")]
+
+
+def test_hostname_is_resolved_and_pinned_under_trio() -> None:
+    requests: list[httpx.Request] = []
+
+    def record(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return _markdown(request)
+
+    client = MarkdownForAgentsClient(transport=httpx.MockTransport(record))
+
+    result = anyio.run(client.fetch, "https://example.com/page", backend="trio")
+
+    assert result.markdown == "# Page"
+    assert requests[0].url == f"https://{PUBLIC_ADDRESS}/page"
