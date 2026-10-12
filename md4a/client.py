@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from . import __version__
+
 MARKDOWN_ACCEPT = "text/markdown"
 
 
@@ -50,7 +52,7 @@ class MarkdownForAgentsClient:
             follow_redirects=False,
             timeout=self.timeout,
             transport=self.transport,
-            headers={"Accept": MARKDOWN_ACCEPT, "User-Agent": "md4a/0.1"},
+            headers={"Accept": MARKDOWN_ACCEPT, "User-Agent": f"md4a/{__version__}"},
         ) as client:
             current_url = url
             for _ in range(11):
