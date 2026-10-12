@@ -124,6 +124,30 @@ response headers. Use caching for public, non-personalized content, and keep
 authentication outside md4a: route-level authentication does not run on these
 shortcuts. See [middleware ordering](QUICKSTART.md#middleware-ordering-and-response-headers).
 
+## Cache lifetime
+
+Cached Markdown is served until the store drops it, and by default a store never
+does: a converted page stays as it was first rendered. Give the store a lifetime,
+bound it, or stop caching responses:
+
+```python
+from md4a import FileStore, MemoryStore, add_md4a
+
+add_md4a(app, store=MemoryStore(ttl=300, max_entries=1000))  # 5 minutes, 1000 pages
+add_md4a(app, store=FileStore(".md4a-cache", ttl=3600))  # 1 hour, on disk
+add_md4a(app, cache_responses=False)  # convert every request
+```
+
+- `ttl` is in seconds. An entry that old is treated as missing, so the route runs
+  again and the fresh result is stored.
+- `max_entries` (`MemoryStore` only) drops expired entries, then the oldest stored,
+  when the limit is reached. The cache key includes the query string, so set it
+  when callers control the query.
+- `store.delete(key)` and `store.clear()` remove entries by hand, for example after
+  publishing a change.
+- `cache_responses=False` stops md4a writing responses to the store. Content already
+  in the store, and provider content, is still served.
+
 ## Remote discovery and standalone service
 
 With the uv-managed project environment, run the CLI with `uv run`:

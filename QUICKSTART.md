@@ -143,6 +143,11 @@ add_md4a(
 
 The provider key includes the request path and, when present, its query string.
 
+Cached pages are served until the store drops them, and by default they never
+expire. Pass `ttl` (seconds) to `MemoryStore` or `FileStore`, `max_entries` to
+`MemoryStore`, or `cache_responses=False` to `add_md4a`; see
+[cache lifetime](README.md#cache-lifetime).
+
 ## Probe a remote page
 
 Print verified Markdown to standard output:
