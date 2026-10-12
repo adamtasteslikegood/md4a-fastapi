@@ -68,6 +68,9 @@ class MarkdownForAgentsMiddleware:
     Other responses, and bodies over that limit, are streamed through unconverted
     and uncached.
 
+    Cached content is served until the store drops it; give the store a ttl to
+    refresh it, or pass cache_responses=False to stop writing responses to the store.
+
     Conversion preserves response headers except metadata tied to the HTML bytes.
     Stores contain only content: security/auth middleware must wrap this middleware
     to run on cache hits and provider responses as well as converted responses.
@@ -81,12 +84,14 @@ class MarkdownForAgentsMiddleware:
         provider: MarkdownProvider | None = None,
         convert_html: bool = True,
         max_html_bytes: int = 5_000_000,
+        cache_responses: bool = True,
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
         self.provider = provider
         self.convert_html = convert_html
         self.max_html_bytes = max_html_bytes
+        self.cache_responses = cache_responses
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["method"] != "GET":
@@ -180,13 +185,14 @@ class MarkdownForAgentsMiddleware:
                 text = None
             if text is None or media_type == "text/markdown":
                 # Undecodable content is returned as the application sent it, uncached.
-                if text is not None:
+                if text is not None and self.cache_responses:
                     self.store.put(key, text)
                 await send(start)
                 await send({"type": "http.response.body", "body": body})
                 return
             converted = markdownify(text, heading_style="ATX")
-            self.store.put(key, converted)
+            if self.cache_responses:
+                self.store.put(key, converted)
             await self._send_markdown(
                 send, converted, status=start["status"], raw_headers=start["headers"]
             )
@@ -234,6 +240,7 @@ def add_md4a(
     provider: MarkdownProvider | None = None,
     convert_html: bool = True,
     max_html_bytes: int = 5_000_000,
+    cache_responses: bool = True,
 ) -> None:
     """Add Markdown-for-Agents negotiation to an existing FastAPI app."""
     app.add_middleware(
@@ -242,4 +249,5 @@ def add_md4a(
         provider=provider,
         convert_html=convert_html,
         max_html_bytes=max_html_bytes,
+        cache_responses=cache_responses,
     )

@@ -23,6 +23,7 @@ and stores verified or converted Markdown in memory or on disk.
 - `md4a/client.py` — requests remote URLs with `Accept: text/markdown`; validates
   schemes, redirects, host allowlists, status codes, media type, and response size.
 - `md4a/store.py` — `MemoryStore`, filesystem-backed `FileStore`, and the store protocol.
+  Both stores support `ttl`, `delete`, and `clear`; the protocol itself is `get`/`put`.
 - `md4a/app.py` — standalone FastAPI application with `/health` and `/fetch`.
 - `md4a/cli.py` — `md4a fetch` and `md4a serve` commands.
 - `md4a/__init__.py` — public exports and canonical runtime `__version__`.
