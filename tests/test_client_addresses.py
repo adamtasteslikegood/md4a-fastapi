@@ -485,3 +485,29 @@ def test_hostname_is_resolved_and_pinned_under_trio() -> None:
 
     assert result.markdown == "# Page"
     assert requests[0].url == f"https://{PUBLIC_ADDRESS}/page"
+
+
+def test_supplied_transport_is_entered_and_exited_once() -> None:
+    events: list[str] = []
+
+    class Transport(httpx.AsyncBaseTransport):
+        async def __aenter__(self) -> "Transport":
+            events.append("enter")
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            events.append("exit")
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            events.append(request.headers["host"])
+            if request.url.path == "/start":
+                return httpx.Response(302, headers={"location": "https://other.example/next"})
+            return _markdown(request)
+
+    client = MarkdownForAgentsClient(transport=Transport())
+
+    with pytest.raises(httpx.ConnectError):  # other.example does not resolve
+        asyncio.run(client.fetch("https://example.com/start"))
+    asyncio.run(client.fetch("https://example.com/page"))
+
+    assert events == ["enter", "example.com", "exit", "enter", "example.com", "exit"]

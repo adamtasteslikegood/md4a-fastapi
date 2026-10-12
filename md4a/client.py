@@ -5,6 +5,7 @@ import socket
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import TracebackType
 from urllib.parse import urlparse
 
 import anyio
@@ -137,19 +138,20 @@ class _RoutingTransport(httpx.AsyncBaseTransport):
         self._direct_transport = direct_transport
         self._direct: dict[str, httpx.AsyncBaseTransport] = {}
         self._proxies: dict[str, httpx.AsyncBaseTransport] = {}
+        self._entered: dict[int, httpx.AsyncBaseTransport] = {}
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         proxy = request.extensions.get(_PROXY)
         if proxy is not None:
             if proxy not in self._proxies:
-                self._proxies[proxy] = httpx.AsyncHTTPTransport(proxy=proxy)
+                self._proxies[proxy] = await self._enter(httpx.AsyncHTTPTransport(proxy=proxy))
             return await self._proxies[proxy].handle_async_request(request)
         addresses = request.extensions.get(_ADDRESSES)
         if not addresses:
             raise ValueError("refusing to send a request whose destination was not checked")
         hostname = request.url.raw_host.decode("ascii")
         if hostname not in self._direct:
-            self._direct[hostname] = self._direct_transport()
+            self._direct[hostname] = await self._enter(self._direct_transport())
         direct = self._direct[hostname]
         extensions = {**request.extensions, "sni_hostname": hostname}
         for index, address in enumerate(addresses):
@@ -168,11 +170,25 @@ class _RoutingTransport(httpx.AsyncBaseTransport):
                     raise
         raise AssertionError("unreachable")
 
+    async def _enter(self, transport: httpx.AsyncBaseTransport) -> httpx.AsyncBaseTransport:
+        # A supplied transport is handed out for every hostname; enter it once.
+        if id(transport) not in self._entered:
+            self._entered[id(transport)] = transport
+            await transport.__aenter__()
+        return transport
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        entered, self._entered = self._entered, {}
+        for transport in entered.values():
+            await transport.__aexit__(exc_type, exc_value, traceback)
+
     async def aclose(self) -> None:
-        # A supplied transport is handed out for every hostname; close it once.
-        transports = [*self._direct.values(), *self._proxies.values()]
-        for transport in {id(transport): transport for transport in transports}.values():
-            await transport.aclose()
+        await self.__aexit__()
 
 
 @dataclass(frozen=True, slots=True)
