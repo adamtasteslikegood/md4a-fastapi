@@ -18,7 +18,14 @@ def create_app() -> FastAPI:
         {host.strip() for host in allowed.split(",") if host.strip()} if allowed else None
     )
     store = FileStore(cache_dir)
-    client = MarkdownForAgentsClient(allowed_hosts=allowed_hosts)
+    allow_private = os.getenv("MD4A_ALLOW_PRIVATE_ADDRESSES", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    client = MarkdownForAgentsClient(
+        allowed_hosts=allowed_hosts, allow_private_addresses=allow_private
+    )
     app = FastAPI(title="md4a", version=__version__)
 
     @app.get("/health")

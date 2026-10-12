@@ -191,6 +191,15 @@ Standalone configuration:
 | --- | --- | --- |
 | `MD4A_CACHE_DIR` | `.md4a-cache` | Directory for fetched Markdown and its index |
 | `MD4A_ALLOWED_HOSTS` | unrestricted | Comma-separated hostname allowlist |
+| `MD4A_ALLOW_PRIVATE_ADDRESSES` | off | Set to `1`, `true`, or `yes` to permit non-public destinations |
+
+The client refuses destinations that are, or resolve to, loopback, private,
+link-local, or other non-public addresses, on the first request and on every
+redirect, and connects to the address it checked. This applies to allowlisted hosts
+too. Behind an environment proxy the proxy resolves names, so only literal addresses
+and hosts that bypass the proxy are checked; see [SECURITY.md](SECURITY.md). For local development, pass `allow_private_addresses=True` to
+`MarkdownForAgentsClient`, `--allow-private-addresses` to `md4a fetch`, or set
+`MD4A_ALLOW_PRIVATE_ADDRESSES` for the service.
 
 Always set `MD4A_ALLOWED_HOSTS` before exposing the standalone fetch service to
 untrusted users. An unrestricted URL-fetching endpoint can create an SSRF risk.

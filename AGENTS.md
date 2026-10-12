@@ -87,6 +87,12 @@ redirects, allowlists, size limits, error paths, and storage behavior.
   middleware outside md4a so it runs on cache/provider shortcuts; route-level auth
   is bypassed on those paths. Restrict path/query-keyed caches to public content.
 - Keep redirect validation active before each outbound request.
+- The remote client rejects non-public destination addresses and connects to the
+  address it validated; keep that check on every hop and keep the opt-out explicit.
+  Direct connections use one transport per hostname, because a pool only sees the
+  pinned address; md4a decides proxy-versus-direct itself, following httpx's rules.
+- Keep the remote client independent of the async backend: use anyio, not asyncio,
+  for timeouts and name resolution. The suite runs one fetch under Trio.
 - Treat remote fetching as SSRF-sensitive. Do not weaken scheme or host validation;
   deployments exposed to untrusted callers must set `MD4A_ALLOWED_HOSTS` and should
   also enforce network-level egress controls.
