@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -13,6 +14,7 @@ from . import __version__
 MARKDOWN_ACCEPT = "text/markdown"
 
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
+_ADDRESS = "md4a.address"
 
 
 def _is_public(value: str) -> bool:
@@ -28,6 +30,36 @@ def _is_public(value: str) -> bool:
         if embedded is not None:
             address = embedded
     return address.is_global and not address.is_multicast
+
+
+class _PinnedTransport(httpx.AsyncBaseTransport):
+    """Connect to the address that was checked instead of resolving the name again.
+
+    Only the connection target changes: the hostname is kept for Host, SNI, and
+    certificate verification, and the client still sees the original URL, so
+    redirects and cookies stay scoped to the hostname.
+    """
+
+    def __init__(self, transport: httpx.AsyncBaseTransport) -> None:
+        self._transport = transport
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        address = request.extensions.get(_ADDRESS)
+        if address is not None:
+            request = httpx.Request(
+                request.method,
+                request.url.copy_with(host=address),
+                headers=request.headers,
+                stream=request.stream,
+                extensions={
+                    **request.extensions,
+                    "sni_hostname": request.url.raw_host.decode("ascii"),
+                },
+            )
+        return await self._transport.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,11 +100,39 @@ class MarkdownForAgentsClient:
         if self.allowed_hosts is not None and parsed.hostname not in self.allowed_hosts:
             raise ValueError(f"host is not allowed: {parsed.hostname}")
 
-    async def _public_address(self, host: str) -> str:
-        """Resolve host and return one address, refusing any non-public result."""
+    def _proxied(self, url: httpx.URL) -> bool:
+        """Return true when httpx will send this URL through an environment proxy."""
+        if self.transport is not None:
+            # httpx ignores environment proxies when it is given a transport.
+            return False
+        proxies = urllib.request.getproxies()
+        if not (proxies.get(url.scheme) or proxies.get("all")):
+            return False
+        return not urllib.request.proxy_bypass(url.host)
+
+    def _client_transport(self) -> httpx.AsyncBaseTransport | None:
+        if self.allow_private_addresses:
+            return self.transport
+        if self.transport is not None:
+            return _PinnedTransport(self.transport)
+        proxies = urllib.request.getproxies()
+        if any(proxies.get(scheme) for scheme in ("http", "https", "all")):
+            # Leave proxy routing to httpx. A proxy resolves names itself and is
+            # addressed by hostname, so connections through it cannot be pinned.
+            return None
+        return _PinnedTransport(httpx.AsyncHTTPTransport())
+
+    async def _checked_address(self, url: str) -> str | None:
+        """Refuse a non-public destination; return the address to connect to, if known."""
+        if self.allow_private_addresses:
+            return None
+        target = httpx.URL(url)
+        host = target.raw_host.decode("ascii")
         try:
             addresses = [str(ipaddress.ip_address(host))]
         except ValueError:
+            if self._proxied(target):
+                return None
             try:
                 async with asyncio.timeout(self.timeout):
                     found = await asyncio.get_running_loop().getaddrinfo(
@@ -85,40 +145,28 @@ class MarkdownForAgentsClient:
             raise ValueError(f"host is not a public address: {host}")
         return addresses[0]
 
-    async def _build_request(self, client: httpx.AsyncClient, url: str) -> httpx.Request:
-        if self.allow_private_addresses:
-            return client.build_request("GET", url)
-        # Connect to the address that was checked, so a second DNS answer cannot
-        # redirect the connection; keep the hostname for Host, SNI, and certificates.
-        target = httpx.URL(url)
-        address = await self._public_address(target.host)
-        return client.build_request(
-            "GET",
-            target.copy_with(host=address),
-            headers={"Host": target.netloc.decode("ascii")},
-            extensions={"sni_hostname": target.host},
-        )
-
     async def fetch(self, url: str) -> FetchResult:
         self._validate_url(url)
         async with httpx.AsyncClient(
             follow_redirects=False,
             timeout=self.timeout,
-            transport=self.transport,
+            transport=self._client_transport(),
             headers={"Accept": MARKDOWN_ACCEPT, "User-Agent": f"md4a/{__version__}"},
         ) as client:
             current_url = url
             for _ in range(11):
                 self._validate_url(current_url)
-                request = await self._build_request(client, current_url)
+                address = await self._checked_address(current_url)
+                request = client.build_request(
+                    "GET", current_url, extensions={_ADDRESS: address} if address else {}
+                )
                 response = await client.send(request, stream=True)
                 if response.is_redirect:
-                    location = response.headers.get("location")
+                    redirect = response.next_request
                     await response.aclose()
-                    if not location:
+                    if redirect is None:
                         raise ValueError("redirect response did not include a usable location")
-                    # Resolve against the requested URL, not the address connected to.
-                    current_url = str(httpx.URL(current_url).join(location))
+                    current_url = str(redirect.url)
                     continue
 
                 try:
@@ -141,7 +189,7 @@ class MarkdownForAgentsClient:
                     )
                     return FetchResult(
                         requested_url=url,
-                        final_url=str(httpx.URL(current_url)),
+                        final_url=str(response.url),
                         status_code=response.status_code,
                         content_type=content_type,
                         markdown=markdown,

@@ -196,7 +196,8 @@ Standalone configuration:
 The client refuses destinations that are, or resolve to, loopback, private,
 link-local, or other non-public addresses, on the first request and on every
 redirect, and connects to the address it checked. This applies to allowlisted hosts
-too. For local development, pass `allow_private_addresses=True` to
+too. Behind an environment proxy the proxy resolves names, so only literal addresses
+and hosts that bypass the proxy are checked; see [SECURITY.md](SECURITY.md). For local development, pass `allow_private_addresses=True` to
 `MarkdownForAgentsClient`, `--allow-private-addresses` to `md4a fetch`, or set
 `MD4A_ALLOW_PRIVATE_ADDRESSES` for the service.
 

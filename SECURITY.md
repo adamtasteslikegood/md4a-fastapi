@@ -26,3 +26,8 @@ private, link-local, or other non-public addresses, including on redirects, and
 connects to the address it validated. `MD4A_ALLOW_PRIVATE_ADDRESSES`,
 `--allow-private-addresses`, and `allow_private_addresses=True` turn this off; do
 not enable them on a service reachable by untrusted clients.
+
+When an HTTP proxy is configured in the environment (`HTTPS_PROXY`, `HTTP_PROXY`,
+`ALL_PROXY`), the proxy resolves hostnames, so md4a cannot check or pin the
+address for proxied requests. It still refuses literal non-public addresses and
+checks hosts that bypass the proxy; the proxy must enforce the rest.

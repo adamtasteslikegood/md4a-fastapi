@@ -186,3 +186,96 @@ def test_standalone_service_private_address_opt_in(monkeypatch: pytest.MonkeyPat
 
     assert response.status_code == 502
     assert "origin request failed" in response.json()["detail"]
+
+
+def _cookie_then_redirect(location: str) -> list[httpx.Request]:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/start":
+            return httpx.Response(
+                302, headers={"location": location, "set-cookie": "session=secret; Path=/"}
+            )
+        return _markdown(request)
+
+    _, requests = _fetch("https://example.com/start", handler)
+    return requests
+
+
+def test_cookie_is_not_sent_to_another_host_sharing_the_address(
+    dns: dict[str, list[str]],
+) -> None:
+    dns["other.example"] = [PUBLIC_ADDRESS]
+
+    requests = _cookie_then_redirect("https://other.example/next")
+
+    assert requests[1].headers["host"] == "other.example"
+    assert "cookie" not in requests[1].headers
+
+
+def test_cookie_is_sent_back_to_the_host_that_set_it() -> None:
+    requests = _cookie_then_redirect("/next")
+
+    assert requests[1].headers["cookie"] == "session=secret"
+
+
+PROXY_VARIABLES = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"]
+
+
+def _fetch_through_proxy(
+    monkeypatch: pytest.MonkeyPatch, url: str, *, no_proxy: str = ""
+) -> tuple[list[str], BaseException | None]:
+    """Fetch with HTTPS_PROXY pointing at a local listener; return what it was asked for."""
+    for name in PROXY_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    request_lines: list[str] = []
+
+    async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        request_lines.append((await reader.readline()).decode().strip())
+        writer.close()
+
+    async def run() -> BaseException | None:
+        server = await asyncio.start_server(serve, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        monkeypatch.setenv("HTTPS_PROXY", f"http://127.0.0.1:{port}")
+        if no_proxy:
+            monkeypatch.setenv("NO_PROXY", no_proxy)
+        try:
+            await MarkdownForAgentsClient(timeout=5).fetch(url)
+        except (ValueError, httpx.HTTPError) as exc:
+            return exc
+        finally:
+            server.close()
+            await server.wait_closed()
+        return None
+
+    return request_lines, asyncio.run(run())
+
+
+def test_environment_proxy_is_asked_for_the_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The proxy resolves the name; pinning an address would break TLS through it.
+    lines, error = _fetch_through_proxy(monkeypatch, "https://proxied.example/page")
+
+    assert lines == ["CONNECT proxied.example:443 HTTP/1.1"]
+    assert isinstance(error, httpx.HTTPError)
+
+
+def test_literal_private_address_is_rejected_behind_a_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines, error = _fetch_through_proxy(monkeypatch, "https://10.0.0.5/page")
+
+    assert lines == []
+    assert isinstance(error, ValueError) and "not a public address" in str(error)
+
+
+def test_host_bypassing_the_proxy_is_still_resolved_and_checked(
+    monkeypatch: pytest.MonkeyPatch, dns: dict[str, list[str]]
+) -> None:
+    dns["internal.example"] = ["10.0.0.5"]
+
+    lines, error = _fetch_through_proxy(
+        monkeypatch, "https://internal.example/page", no_proxy="internal.example"
+    )
+
+    assert lines == []
+    assert isinstance(error, ValueError) and "not a public address" in str(error)
