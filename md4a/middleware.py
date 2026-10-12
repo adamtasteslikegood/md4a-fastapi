@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from email.message import Message as EmailMessage
 
 from fastapi import FastAPI
 from markdownify import markdownify
@@ -36,11 +37,10 @@ def _declared_length(headers: Headers) -> int:
 
 
 def _declared_charset(headers: Headers) -> str:
-    for parameter in headers.get("content-type", "").split(";")[1:]:
-        name, _, value = parameter.partition("=")
-        if name.strip().lower() == "charset":
-            return value.strip().strip('"') or "utf-8"
-    return "utf-8"
+    # Quote-aware: a ";" inside a quoted parameter value does not start a parameter.
+    message = EmailMessage()
+    message["content-type"] = headers.get("content-type", "")
+    return message.get_content_charset() or "utf-8"
 
 
 def accepts_markdown(value: str) -> bool:
@@ -174,7 +174,9 @@ class MarkdownForAgentsMiddleware:
             body = b"".join(body_parts)
             try:
                 text = body.decode(_declared_charset(Headers(raw=start["headers"])))
-            except (LookupError, UnicodeDecodeError):
+                # Some codecs decode to lone surrogates, which cannot be served or stored.
+                text.encode("utf-8")
+            except (LookupError, UnicodeError):
                 text = None
             if text is None or media_type == "text/markdown":
                 # Undecodable content is returned as the application sent it, uncached.
