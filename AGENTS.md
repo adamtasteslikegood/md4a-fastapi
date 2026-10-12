@@ -87,6 +87,8 @@ redirects, allowlists, size limits, error paths, and storage behavior.
   middleware outside md4a so it runs on cache/provider shortcuts; route-level auth
   is bypassed on those paths. Restrict path/query-keyed caches to public content.
 - Keep redirect validation active before each outbound request.
+- The remote client rejects non-public destination addresses and connects to the
+  address it validated; keep that check on every hop and keep the opt-out explicit.
 - Treat remote fetching as SSRF-sensitive. Do not weaken scheme or host validation;
   deployments exposed to untrusted callers must set `MD4A_ALLOWED_HOSTS` and should
   also enforce network-level egress controls.

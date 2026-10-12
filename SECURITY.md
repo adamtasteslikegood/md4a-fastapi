@@ -20,3 +20,9 @@ The standalone `/fetch` endpoint makes outbound HTTP requests. Configure
 `MD4A_ALLOWED_HOSTS` before exposing it to untrusted clients, apply network-level
 egress controls where appropriate, and do not treat application allowlisting as
 the only SSRF boundary.
+
+By default the client refuses destinations that are, or resolve to, loopback,
+private, link-local, or other non-public addresses, including on redirects, and
+connects to the address it validated. `MD4A_ALLOW_PRIVATE_ADDRESSES`,
+`--allow-private-addresses`, and `allow_private_addresses=True` turn this off; do
+not enable them on a service reachable by untrusted clients.
