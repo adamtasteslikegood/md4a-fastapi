@@ -111,7 +111,7 @@ range metadata. Compressed, partial, and trailer-bearing responses pass through
 unchanged.
 
 Only successful HTML and Markdown responses are buffered, up to `max_html_bytes`
-(5 MB by default, set on `MarkdownForAgentsMiddleware`). Everything else, including
+(5 MB by default; pass `max_html_bytes=` to `add_md4a`). Everything else, including
 streaming responses and bodies over the limit, is forwarded as it arrives and is
 neither converted nor cached. Bodies are decoded with the charset declared in
 `Content-Type` (UTF-8 when absent); a response that cannot be decoded is returned
