@@ -12,7 +12,7 @@ and stores verified or converted Markdown in memory or on disk.
 - PyPI distribution: `md4a-fastapi`
 - Python import and CLI: `md4a`
 - Runtime: Python 3.11 through 3.14
-- Framework: FastAPI/Starlette ASGI
+- Framework: FastAPI/Starlette ASGI; a WSGI middleware covers Flask and similar apps
 - Build backend: Hatchling
 - License: MIT
 
@@ -20,13 +20,18 @@ and stores verified or converted Markdown in memory or on disk.
 
 - `md4a/middleware.py` — intercepts eligible GET requests, negotiates Markdown,
   invokes providers, converts successful HTML responses, and caches results.
+- `md4a/wsgi.py` — `MarkdownForAgentsWSGIMiddleware`, the same behavior for WSGI
+  applications. It must not import FastAPI, Starlette, or httpx.
+- `md4a/_negotiation.py` — framework-neutral `Accept` parsing, charset lookup, `Vary`
+  merging, and the HTML representation headers; shared by both middlewares.
 - `md4a/client.py` — requests remote URLs with `Accept: text/markdown`; validates
   schemes, redirects, host allowlists, status codes, media type, and response size.
 - `md4a/store.py` — `MemoryStore`, filesystem-backed `FileStore`, and the store protocol.
   Both stores support `ttl`, `delete`, and `clear`; the protocol itself is `get`/`put`.
 - `md4a/app.py` — standalone FastAPI application with `/health` and `/fetch`.
 - `md4a/cli.py` — `md4a fetch` and `md4a serve` commands.
-- `md4a/__init__.py` — public exports and canonical runtime `__version__`.
+- `md4a/__init__.py` — public exports, loaded on first use so that `md4a.wsgi` does not
+  pull in the ASGI stack, and the canonical runtime `__version__`.
 - `tests/` — unit and integration-style tests using pytest and FastAPI TestClient.
 - `.github/workflows/` — CI, CodeQL, and PyPI publishing automation.
 - `README.md`, `QUICKSTART.md` — user installation and usage documentation.
