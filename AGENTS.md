@@ -89,7 +89,9 @@ redirects, allowlists, size limits, error paths, and storage behavior.
 - Treat remote fetching as SSRF-sensitive. Do not weaken scheme or host validation;
   deployments exposed to untrusted callers must set `MD4A_ALLOWED_HOSTS` and should
   also enforce network-level egress controls.
-- Bound buffered response bodies and HTML conversion inputs.
+- Bound buffered response bodies and HTML conversion inputs. The middleware buffers
+  only successful HTML/Markdown bodies up to `max_html_bytes`; other, streaming, and
+  oversized responses must be forwarded as they arrive, unconverted and uncached.
 - Treat filesystem paths and cache indexes as security-sensitive.
 - Never commit credentials, PyPI tokens, private URLs, or fetched private content.
 - Keep `pyproject.toml` version and `md4a.__version__` synchronized. Runtime consumers,
