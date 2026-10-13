@@ -17,6 +17,7 @@ responses.
 ## Features
 
 - ASGI middleware designed for FastAPI
+- WSGI middleware for Flask and other WSGI applications
 - `Accept: text/markdown` negotiation for GET requests
 - HTML-to-Markdown conversion with transparent pass-through for other media types
 - Synchronous provider hook for hand-authored Markdown
@@ -124,6 +125,85 @@ response headers. Use caching for public, non-personalized content, and keep
 authentication outside md4a: route-level authentication does not run on these
 shortcuts. See [middleware ordering](QUICKSTART.md#middleware-ordering-and-response-headers).
 
+### Converting only the content
+
+By default the whole HTML document is converted, navigation and footer included.
+`content_selector` is a CSS selector; only its first match is converted.
+`strip_selectors` are CSS selectors whose elements are removed first:
+
+```python
+add_md4a(app, content_selector="main", strip_selectors=[".related", "form"])
+```
+
+A page the content selector does not match is converted whole. Provider, cached,
+and application-authored Markdown are not affected.
+
+## Flask and other WSGI applications
+
+`MarkdownForAgentsWSGIMiddleware` applies the same negotiation to a WSGI
+application. It takes the same `store`, `provider`, `convert_html`,
+`max_html_bytes`, `cache_responses`, `content_selector`, and `strip_selectors`
+options as `add_md4a`:
+
+```python
+from flask import Flask
+
+from md4a import FileStore, MarkdownForAgentsWSGIMiddleware
+
+app = Flask(__name__)
+app.wsgi_app = MarkdownForAgentsWSGIMiddleware(app.wsgi_app, store=FileStore(".md4a-cache"))
+
+
+@app.get("/")
+def home() -> str:
+    return "<h1>Hello agents</h1><p>This remains HTML for browsers.</p>"
+```
+
+The rules above apply unchanged: provider and cached content take precedence,
+only successful HTML and Markdown `GET` responses up to `max_html_bytes` are
+buffered, application headers are kept, and compressed, partial, and oversized
+responses pass through. The cache key is the percent-encoded `SCRIPT_NAME` plus
+`PATH_INFO`, followed by `?` and the query string when there is one.
+
+A response the application sends through the legacy `write()` callable passes
+through unconverted. Importing `md4a.wsgi`, or `MarkdownForAgentsWSGIMiddleware`
+from `md4a`, does not import FastAPI or Starlette, although both are still
+installed as dependencies of the package.
+
+Use WSGI conversion for ordinary buffered page responses, not streaming HTML
+iterables. The middleware must see the complete eligible body before it can choose
+converted headers or an unchanged size/decoding fallback, so that conversion path
+cannot preserve PEP 3333 asynchronous block-boundary scheduling. Responses whose
+initial status and headers establish pass-through return the application's original
+iterable, including `wsgi.file_wrapper` objects used for optimized file transfer.
+
+As with ASGI, cache and provider hits return before the wrapped application runs,
+so wrap only public, non-personalized pages and keep authentication outside md4a.
+
+## Cache lifetime
+
+Cached Markdown is served until the store drops it, and by default a store never
+does: a converted page stays as it was first rendered. Give the store a lifetime,
+bound it, or stop caching responses:
+
+```python
+from md4a import FileStore, MemoryStore, add_md4a
+
+add_md4a(app, store=MemoryStore(ttl=300, max_entries=1000))  # 5 minutes, 1000 pages
+add_md4a(app, store=FileStore(".md4a-cache", ttl=3600))  # 1 hour, on disk
+add_md4a(app, cache_responses=False)  # convert every request
+```
+
+- `ttl` is in seconds. An entry that old is treated as missing, so the route runs
+  again and the fresh result is stored.
+- `max_entries` (`MemoryStore` only) drops expired entries, then the oldest stored,
+  when the limit is reached. The cache key includes the query string, so set it
+  when callers control the query.
+- `store.delete(key)` and `store.clear()` remove entries by hand, for example after
+  publishing a change.
+- `cache_responses=False` stops md4a writing responses to the store. Content already
+  in the store, and provider content, is still served.
+
 ## Remote discovery and standalone service
 
 With the uv-managed project environment, run the CLI with `uv run`:
@@ -167,6 +247,15 @@ Standalone configuration:
 | --- | --- | --- |
 | `MD4A_CACHE_DIR` | `.md4a-cache` | Directory for fetched Markdown and its index |
 | `MD4A_ALLOWED_HOSTS` | unrestricted | Comma-separated hostname allowlist |
+| `MD4A_ALLOW_PRIVATE_ADDRESSES` | off | Set to `1`, `true`, or `yes` to permit non-public destinations |
+
+The client refuses destinations that are, or resolve to, loopback, private,
+link-local, or other non-public addresses, on the first request and on every
+redirect, and connects to the address it checked. This applies to allowlisted hosts
+too. Behind an environment proxy the proxy resolves names, so only literal addresses
+and hosts that bypass the proxy are checked; see [SECURITY.md](SECURITY.md). For local development, pass `allow_private_addresses=True` to
+`MarkdownForAgentsClient`, `--allow-private-addresses` to `md4a fetch`, or set
+`MD4A_ALLOW_PRIVATE_ADDRESSES` for the service.
 
 Always set `MD4A_ALLOWED_HOSTS` before exposing the standalone fetch service to
 untrusted users. An unrestricted URL-fetching endpoint can create an SSRF risk.
@@ -179,7 +268,8 @@ untrusted users. An unrestricted URL-fetching endpoint can create an SSRF risk.
 
 ## Project scope
 
-`md4a-fastapi` focuses on FastAPI/ASGI integration and verified Markdown retrieval.
+`md4a-fastapi` focuses on FastAPI/ASGI integration, a WSGI middleware with the same
+behavior, and verified Markdown retrieval.
 It does not attempt to reproduce a browser, execute JavaScript, or claim that
 converted Markdown is identical to a publisher-authored agent representation.
 

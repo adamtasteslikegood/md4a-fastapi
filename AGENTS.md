@@ -12,7 +12,7 @@ and stores verified or converted Markdown in memory or on disk.
 - PyPI distribution: `md4a-fastapi`
 - Python import and CLI: `md4a`
 - Runtime: Python 3.11 through 3.14
-- Framework: FastAPI/Starlette ASGI
+- Framework: FastAPI/Starlette ASGI; a WSGI middleware covers Flask and similar apps
 - Build backend: Hatchling
 - License: MIT
 
@@ -20,12 +20,18 @@ and stores verified or converted Markdown in memory or on disk.
 
 - `md4a/middleware.py` — intercepts eligible GET requests, negotiates Markdown,
   invokes providers, converts successful HTML responses, and caches results.
+- `md4a/wsgi.py` — `MarkdownForAgentsWSGIMiddleware`, the same behavior for WSGI
+  applications. It must not import FastAPI, Starlette, or httpx.
+- `md4a/_negotiation.py` — framework-neutral `Accept` parsing, charset lookup, `Vary`
+  merging, and the HTML representation headers; shared by both middlewares.
 - `md4a/client.py` — requests remote URLs with `Accept: text/markdown`; validates
   schemes, redirects, host allowlists, status codes, media type, and response size.
 - `md4a/store.py` — `MemoryStore`, filesystem-backed `FileStore`, and the store protocol.
+  Both stores support `ttl`, `delete`, and `clear`; the protocol itself is `get`/`put`.
 - `md4a/app.py` — standalone FastAPI application with `/health` and `/fetch`.
 - `md4a/cli.py` — `md4a fetch` and `md4a serve` commands.
-- `md4a/__init__.py` — public exports and canonical runtime `__version__`.
+- `md4a/__init__.py` — public exports, loaded on first use so that `md4a.wsgi` does not
+  pull in the ASGI stack, and the canonical runtime `__version__`.
 - `tests/` — unit and integration-style tests using pytest and FastAPI TestClient.
 - `.github/workflows/` — CI, CodeQL, and PyPI publishing automation.
 - `README.md`, `QUICKSTART.md` — user installation and usage documentation.
@@ -86,12 +92,23 @@ redirects, allowlists, size limits, error paths, and storage behavior.
   middleware outside md4a so it runs on cache/provider shortcuts; route-level auth
   is bypassed on those paths. Restrict path/query-keyed caches to public content.
 - Keep redirect validation active before each outbound request.
+- The remote client rejects non-public destination addresses and connects to the
+  address it validated; keep that check on every hop and keep the opt-out explicit.
+  Direct connections use one transport per hostname, because a pool only sees the
+  pinned address; md4a decides proxy-versus-direct itself, following httpx's rules.
+- Keep the remote client independent of the async backend: use anyio, not asyncio,
+  for timeouts and name resolution. The suite runs one fetch under Trio.
 - Treat remote fetching as SSRF-sensitive. Do not weaken scheme or host validation;
   deployments exposed to untrusted callers must set `MD4A_ALLOWED_HOSTS` and should
   also enforce network-level egress controls.
 - Bound buffered response bodies and HTML conversion inputs. The middleware buffers
   only successful HTML/Markdown bodies up to `max_html_bytes`; other, streaming, and
   oversized responses must be forwarded as they arrive, unconverted and uncached.
+- For WSGI, preserve the application's original iterable when `start_response`
+  immediately establishes pass-through, especially `wsgi.file_wrapper`. Eligible
+  HTML/Markdown conversion buffers the complete response and does not preserve PEP
+  3333 asynchronous block-boundary scheduling; document that streaming HTML is not
+  a supported conversion path.
 - Treat filesystem paths and cache indexes as security-sensitive.
 - Never commit credentials, PyPI tokens, private URLs, or fetched private content.
 - Keep `pyproject.toml` version and `md4a.__version__` synchronized. Runtime consumers,

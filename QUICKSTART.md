@@ -122,6 +122,26 @@ authentication dependencies on individual routes are bypassed by cache/provider
 responses. Request `/hello` twice with `Accept: text/markdown` to verify that both
 the converted response and cache hit carry the security headers.
 
+### Flask and other WSGI applications
+
+Wrap the WSGI callable with `MarkdownForAgentsWSGIMiddleware`; it takes the same
+options and follows the same rules as `add_md4a`:
+
+```python
+from md4a import MarkdownForAgentsWSGIMiddleware
+
+app.wsgi_app = MarkdownForAgentsWSGIMiddleware(app.wsgi_app)
+```
+
+Cache hits and provider responses return before the Flask application runs, so
+`after_request` handlers do not see them. Add a WSGI middleware outside md4a for
+headers that every response needs. See the
+[README](README.md#flask-and-other-wsgi-applications) for details.
+
+Use this conversion path for buffered pages rather than streaming HTML iterables.
+Immediately known pass-through responses retain their original WSGI iterable,
+including server-specific `wsgi.file_wrapper` objects.
+
 ## Serve hand-authored Markdown
 
 Use a provider when conversion is not the desired source of truth:
@@ -142,6 +162,11 @@ add_md4a(
 ```
 
 The provider key includes the request path and, when present, its query string.
+
+Cached pages are served until the store drops them, and by default they never
+expire. Pass `ttl` (seconds) to `MemoryStore` or `FileStore`, `max_entries` to
+`MemoryStore`, or `cache_responses=False` to `add_md4a`; see
+[cache lifetime](README.md#cache-lifetime).
 
 ## Probe a remote page
 

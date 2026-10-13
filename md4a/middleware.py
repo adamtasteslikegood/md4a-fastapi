@@ -1,32 +1,25 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from email.message import Message as EmailMessage
+from collections.abc import Callable, Sequence
 
 from fastapi import FastAPI
-from markdownify import markdownify
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from ._negotiation import (
+    HTML_REPRESENTATION_HEADERS,
+    MARKDOWN_CONTENT_TYPE,
+    accepts_markdown,
+    declared_charset,
+    html_to_markdown,
+    vary_with_accept,
+)
 from .store import MemoryStore, Store
 
 MarkdownProvider = Callable[[str], str | None]
 
-# These describe the original HTML bytes and cannot be reused after conversion.
-_HTML_REPRESENTATION_HEADERS = {
-    b"content-encoding",
-    b"content-location",
-    b"content-range",
-    b"accept-ranges",
-    b"etag",
-    b"last-modified",
-    b"content-md5",
-    b"digest",
-    b"content-digest",
-    b"repr-digest",
-    b"transfer-encoding",
-    b"trailer",
-}
+# ASGI header names are bytes.
+_HTML_REPRESENTATION_HEADERS = {name.encode() for name in HTML_REPRESENTATION_HEADERS}
 
 
 def _declared_length(headers: Headers) -> int:
@@ -37,24 +30,7 @@ def _declared_length(headers: Headers) -> int:
 
 
 def _declared_charset(headers: Headers) -> str:
-    # Quote-aware: a ";" inside a quoted parameter value does not start a parameter.
-    message = EmailMessage()
-    message["content-type"] = headers.get("content-type", "")
-    return message.get_content_charset() or "utf-8"
-
-
-def accepts_markdown(value: str) -> bool:
-    """Return true when text/markdown is an accepted media range (q=0 excluded)."""
-    for item in value.lower().split(","):
-        media, *parameters = (part.strip() for part in item.split(";"))
-        if media != "text/markdown":
-            continue
-        quality = next((p.partition("=")[2] for p in parameters if p.startswith("q=")), "1")
-        try:
-            return float(quality) > 0
-        except ValueError:
-            return False
-    return False
+    return declared_charset(headers.get("content-type", ""))
 
 
 class MarkdownForAgentsMiddleware:
@@ -67,6 +43,9 @@ class MarkdownForAgentsMiddleware:
     Only successful HTML and Markdown responses are buffered, up to max_html_bytes.
     Other responses, and bodies over that limit, are streamed through unconverted
     and uncached.
+
+    Cached content is served until the store drops it; give the store a ttl to
+    refresh it, or pass cache_responses=False to stop writing responses to the store.
 
     Conversion preserves response headers except metadata tied to the HTML bytes.
     Stores contain only content: security/auth middleware must wrap this middleware
@@ -81,12 +60,18 @@ class MarkdownForAgentsMiddleware:
         provider: MarkdownProvider | None = None,
         convert_html: bool = True,
         max_html_bytes: int = 5_000_000,
+        cache_responses: bool = True,
+        content_selector: str | None = None,
+        strip_selectors: Sequence[str] = (),
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
         self.provider = provider
         self.convert_html = convert_html
         self.max_html_bytes = max_html_bytes
+        self.cache_responses = cache_responses
+        self.content_selector = content_selector
+        self.strip_selectors = tuple(strip_selectors)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["method"] != "GET":
@@ -180,13 +165,18 @@ class MarkdownForAgentsMiddleware:
                 text = None
             if text is None or media_type == "text/markdown":
                 # Undecodable content is returned as the application sent it, uncached.
-                if text is not None:
+                if text is not None and self.cache_responses:
                     self.store.put(key, text)
                 await send(start)
                 await send({"type": "http.response.body", "body": body})
                 return
-            converted = markdownify(text, heading_style="ATX")
-            self.store.put(key, converted)
+            converted = html_to_markdown(
+                text,
+                content_selector=self.content_selector,
+                strip_selectors=self.strip_selectors,
+            )
+            if self.cache_responses:
+                self.store.put(key, converted)
             await self._send_markdown(
                 send, converted, status=start["status"], raw_headers=start["headers"]
             )
@@ -214,15 +204,9 @@ class MarkdownForAgentsMiddleware:
             ],
         }
         headers = MutableHeaders(scope=message)
-        headers["content-type"] = "text/markdown; charset=utf-8"
+        headers["content-type"] = MARKDOWN_CONTENT_TYPE
         headers["content-length"] = str(len(body))
-        vary = [item.strip() for value in headers.getlist("vary") for item in value.split(",")]
-        if "*" in vary:
-            headers["vary"] = "*"
-        else:
-            if "accept" not in {item.lower() for item in vary}:
-                vary.append("Accept")
-            headers["vary"] = ", ".join(item for item in vary if item)
+        headers["vary"] = vary_with_accept(headers.getlist("vary"))
         await send(message)
         await send({"type": "http.response.body", "body": body})
 
@@ -234,6 +218,9 @@ def add_md4a(
     provider: MarkdownProvider | None = None,
     convert_html: bool = True,
     max_html_bytes: int = 5_000_000,
+    cache_responses: bool = True,
+    content_selector: str | None = None,
+    strip_selectors: Sequence[str] = (),
 ) -> None:
     """Add Markdown-for-Agents negotiation to an existing FastAPI app."""
     app.add_middleware(
@@ -242,4 +229,7 @@ def add_md4a(
         provider=provider,
         convert_html=convert_html,
         max_html_bytes=max_html_bytes,
+        cache_responses=cache_responses,
+        content_selector=content_selector,
+        strip_selectors=strip_selectors,
     )

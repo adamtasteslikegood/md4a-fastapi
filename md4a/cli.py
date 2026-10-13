@@ -23,6 +23,11 @@ def parser() -> argparse.ArgumentParser:
         metavar="HOST",
         help="only contact this host; repeatable (default: MD4A_ALLOWED_HOSTS, else unrestricted)",
     )
+    fetch.add_argument(
+        "--allow-private-addresses",
+        action="store_true",
+        help="permit loopback, private, and other non-public destinations",
+    )
     fetch.add_argument("--timeout", type=float, default=15.0, help="seconds (default: 15)")
     fetch.add_argument(
         "--max-bytes", type=int, default=5_000_000, help="response size limit (default: 5000000)"
@@ -45,6 +50,7 @@ async def _fetch(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         max_bytes=args.max_bytes,
         allowed_hosts=_allowed_hosts(args.allowed_host),
+        allow_private_addresses=args.allow_private_addresses,
     )
     try:
         result = await client.fetch(args.url)
