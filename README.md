@@ -17,6 +17,7 @@ responses.
 ## Features
 
 - ASGI middleware designed for FastAPI
+- WSGI middleware for Flask and other WSGI applications
 - `Accept: text/markdown` negotiation for GET requests
 - HTML-to-Markdown conversion with transparent pass-through for other media types
 - Synchronous provider hook for hand-authored Markdown
@@ -124,6 +125,47 @@ response headers. Use caching for public, non-personalized content, and keep
 authentication outside md4a: route-level authentication does not run on these
 shortcuts. See [middleware ordering](QUICKSTART.md#middleware-ordering-and-response-headers).
 
+## Flask and other WSGI applications
+
+`MarkdownForAgentsWSGIMiddleware` applies the same negotiation to a WSGI
+application. It takes the same `store`, `provider`, `convert_html`,
+`max_html_bytes`, and `cache_responses` options as `add_md4a`:
+
+```python
+from flask import Flask
+
+from md4a import FileStore, MarkdownForAgentsWSGIMiddleware
+
+app = Flask(__name__)
+app.wsgi_app = MarkdownForAgentsWSGIMiddleware(app.wsgi_app, store=FileStore(".md4a-cache"))
+
+
+@app.get("/")
+def home() -> str:
+    return "<h1>Hello agents</h1><p>This remains HTML for browsers.</p>"
+```
+
+The rules above apply unchanged: provider and cached content take precedence,
+only successful HTML and Markdown `GET` responses up to `max_html_bytes` are
+buffered, application headers are kept, and compressed, partial, and oversized
+responses pass through. The cache key is the percent-encoded `SCRIPT_NAME` plus
+`PATH_INFO`, followed by `?` and the query string when there is one.
+
+A response the application sends through the legacy `write()` callable passes
+through unconverted. Importing `md4a.wsgi`, or `MarkdownForAgentsWSGIMiddleware`
+from `md4a`, does not import FastAPI or Starlette, although both are still
+installed as dependencies of the package.
+
+Use WSGI conversion for ordinary buffered page responses, not streaming HTML
+iterables. The middleware must see the complete eligible body before it can choose
+converted headers or an unchanged size/decoding fallback, so that conversion path
+cannot preserve PEP 3333 asynchronous block-boundary scheduling. Responses whose
+initial status and headers establish pass-through return the application's original
+iterable, including `wsgi.file_wrapper` objects used for optimized file transfer.
+
+As with ASGI, cache and provider hits return before the wrapped application runs,
+so wrap only public, non-personalized pages and keep authentication outside md4a.
+
 ## Cache lifetime
 
 Cached Markdown is served until the store drops it, and by default a store never
@@ -212,7 +254,8 @@ untrusted users. An unrestricted URL-fetching endpoint can create an SSRF risk.
 
 ## Project scope
 
-`md4a-fastapi` focuses on FastAPI/ASGI integration and verified Markdown retrieval.
+`md4a-fastapi` focuses on FastAPI/ASGI integration, a WSGI middleware with the same
+behavior, and verified Markdown retrieval.
 It does not attempt to reproduce a browser, execute JavaScript, or claim that
 converted Markdown is identical to a publisher-authored agent representation.
 
