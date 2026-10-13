@@ -156,6 +156,13 @@ through unconverted. Importing `md4a.wsgi`, or `MarkdownForAgentsWSGIMiddleware`
 from `md4a`, does not import FastAPI or Starlette, although both are still
 installed as dependencies of the package.
 
+Use WSGI conversion for ordinary buffered page responses, not streaming HTML
+iterables. The middleware must see the complete eligible body before it can choose
+converted headers or an unchanged size/decoding fallback, so that conversion path
+cannot preserve PEP 3333 asynchronous block-boundary scheduling. Responses whose
+initial status and headers establish pass-through return the application's original
+iterable, including `wsgi.file_wrapper` objects used for optimized file transfer.
+
 As with ASGI, cache and provider hits return before the wrapped application runs,
 so wrap only public, non-personalized pages and keep authentication outside md4a.
 

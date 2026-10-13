@@ -71,6 +71,30 @@ class _Exchange:
         return held
 
 
+class _ClosingIterator:
+    """Forward close even when the negotiated iterator was never started."""
+
+    def __init__(self, iterator: Iterator[bytes], close_result: Callable[[], None]) -> None:
+        self.iterator = iterator
+        self.close_result = close_result
+        self.closed = False
+
+    def __iter__(self) -> _ClosingIterator:
+        return self
+
+    def __next__(self) -> bytes:
+        return next(self.iterator)
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            self.iterator.close()
+        finally:
+            self.close_result()
+
+
 class MarkdownForAgentsWSGIMiddleware:
     """Serve Markdown when a GET request explicitly accepts text/markdown.
 
@@ -124,7 +148,7 @@ class MarkdownForAgentsWSGIMiddleware:
 
     def _negotiate(
         self, environ: Environ, start_response: StartResponse, key: str
-    ) -> Iterator[bytes]:
+    ) -> Iterable[bytes]:
         exchange = _Exchange(start_response)
 
         def held_write(data: bytes) -> None:
@@ -175,44 +199,61 @@ class MarkdownForAgentsWSGIMiddleware:
             return held_write
 
         result = self.app(environ, capture)
-        try:
-            for chunk in result:
-                if exchange.passthrough or exchange.status is None:
-                    yield chunk
-                elif exchange.buffered + len(chunk) > self.max_html_bytes:
-                    held = exchange.release()
-                    if held:
-                        yield held
-                    yield chunk
-                else:
-                    exchange.buffered += len(chunk)
-                    exchange.parts.append(chunk)
-        finally:
+        # Preserve server-specific iterables such as wsgi.file_wrapper when the
+        # application has already established that no conversion is possible.
+        if exchange.passthrough:
+            return result
+
+        result_closed = False
+
+        def close_result() -> None:
+            nonlocal result_closed
+            if result_closed:
+                return
+            result_closed = True
             close = getattr(result, "close", None)
             if close is not None:
                 close()
 
-        if exchange.passthrough or exchange.status is None:
-            return
-        body = b"".join(exchange.parts)
-        try:
-            content_type = next(iter(_values(exchange.headers, "content-type")), "")
-            text: str | None = body.decode(declared_charset(content_type))
-            # Some codecs decode to lone surrogates, which cannot be served or stored.
-            text.encode("utf-8")
-        except (LookupError, UnicodeError):
-            text = None
-        if text is None or exchange.media_type == "text/markdown":
-            # Undecodable content is returned as the application sent it, uncached.
-            if text is not None and self.cache_responses:
-                self.store.put(key, text)
-            start_response(exchange.status, exchange.headers)
-            yield body
-            return
-        converted = markdownify(text, heading_style="ATX")
-        if self.cache_responses:
-            self.store.put(key, converted)
-        yield self._start_markdown(start_response, converted, exchange.status, exchange.headers)
+        def negotiate_result() -> Iterator[bytes]:
+            try:
+                for chunk in result:
+                    if exchange.passthrough or exchange.status is None:
+                        yield chunk
+                    elif exchange.buffered + len(chunk) > self.max_html_bytes:
+                        held = exchange.release()
+                        if held:
+                            yield held
+                        yield chunk
+                    else:
+                        exchange.buffered += len(chunk)
+                        exchange.parts.append(chunk)
+            finally:
+                close_result()
+
+            if exchange.passthrough or exchange.status is None:
+                return
+            body = b"".join(exchange.parts)
+            try:
+                content_type = next(iter(_values(exchange.headers, "content-type")), "")
+                text: str | None = body.decode(declared_charset(content_type))
+                # Some codecs decode to lone surrogates, which cannot be served or stored.
+                text.encode("utf-8")
+            except (LookupError, UnicodeError):
+                text = None
+            if text is None or exchange.media_type == "text/markdown":
+                # Undecodable content is returned as the application sent it, uncached.
+                if text is not None and self.cache_responses:
+                    self.store.put(key, text)
+                start_response(exchange.status, exchange.headers)
+                yield body
+                return
+            converted = markdownify(text, heading_style="ATX")
+            if self.cache_responses:
+                self.store.put(key, converted)
+            yield self._start_markdown(start_response, converted, exchange.status, exchange.headers)
+
+        return _ClosingIterator(negotiate_result(), close_result)
 
     @staticmethod
     def _start_markdown(

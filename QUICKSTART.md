@@ -138,6 +138,10 @@ Cache hits and provider responses return before the Flask application runs, so
 headers that every response needs. See the
 [README](README.md#flask-and-other-wsgi-applications) for details.
 
+Use this conversion path for buffered pages rather than streaming HTML iterables.
+Immediately known pass-through responses retain their original WSGI iterable,
+including server-specific `wsgi.file_wrapper` objects.
+
 ## Serve hand-authored Markdown
 
 Use a provider when conversion is not the desired source of truth:

@@ -1,6 +1,7 @@
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Iterator
+from io import BytesIO
 from typing import Any
 from wsgiref.util import setup_testing_defaults
 from wsgiref.validate import validator
@@ -119,10 +120,20 @@ def test_provider_wins_without_running_the_application() -> None:
         page(status="404 Not Found"),
         page(b'{"html": true}', content_type="application/json"),
         page(headers=[("Content-Encoding", "gzip")]),
+        page(headers=[("Content-Encoding", "identity, gzip")]),
+        page(headers=[("Content-Encoding", "identity"), ("Content-Encoding", "gzip")]),
         page(status="206 Partial Content"),
         page(headers=[("Content-Range", "bytes 0-9/100")]),
     ],
-    ids=["not-found", "json", "compressed", "partial", "content-range"],
+    ids=[
+        "not-found",
+        "json",
+        "compressed",
+        "comma-separated-encoding",
+        "repeated-encoding",
+        "partial",
+        "content-range",
+    ],
 )
 def test_unconvertible_responses_pass_through_uncached(
     app: Callable[..., Iterable[bytes]],
@@ -136,6 +147,20 @@ def test_unconvertible_responses_pass_through_uncached(
         direct.body,
     )
     assert store.data == {}
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        [("Content-Encoding", "identity, identity")],
+        [("Content-Encoding", "identity"), ("Content-Encoding", "identity")],
+    ],
+    ids=["comma-separated", "repeated"],
+)
+def test_all_identity_content_encodings_can_be_converted(headers: Headers) -> None:
+    response = call(wrap(page(headers=headers)))
+    assert response.one("Content-Type") == "text/markdown; charset=utf-8"
+    assert response.all("Content-Encoding") == []
 
 
 def test_conversion_keeps_application_headers_and_drops_html_metadata() -> None:
@@ -181,6 +206,39 @@ def test_body_over_the_limit_is_streamed_through_uncached() -> None:
     assert store.data == {}
 
 
+def test_early_close_is_forwarded_to_the_application_iterable() -> None:
+    closed = False
+
+    class CloseTrackingIterator:
+        def __iter__(self) -> "CloseTrackingIterator":
+            return self
+
+        def __next__(self) -> bytes:
+            return b"<p>body</p>"
+
+        def close(self) -> None:
+            nonlocal closed
+            closed = True
+
+    def app(environ: dict[str, Any], start_response: Callable[..., Any]) -> Iterable[bytes]:
+        start_response("200 OK", [("Content-Type", "text/html")])
+        return CloseTrackingIterator()
+
+    environ: dict[str, Any] = {
+        "REQUEST_METHOD": "GET",
+        "QUERY_STRING": "",
+        "HTTP_ACCEPT": "text/markdown",
+    }
+    setup_testing_defaults(environ)
+
+    def start_response(status: str, headers: Headers, exc_info: Any = None) -> Callable[..., None]:
+        return lambda data: None
+
+    result = wrap(app)(environ, start_response)
+    result.close()  # type: ignore[attr-defined]
+    assert closed
+
+
 def test_declared_length_over_the_limit_is_not_buffered() -> None:
     body = b"<p>" + b"x" * 40 + b"</p>"
     store = MemoryStore()
@@ -206,6 +264,27 @@ def test_legacy_write_callable_passes_through() -> None:
     response = call(wrap(app, store=store))
     assert response.one("Content-Type") == "text/html"
     assert response.body == b"<h1>Written</h1><p>returned</p>"
+    assert store.data == {}
+
+
+def test_exc_info_replaces_a_buffered_response() -> None:
+    def app(environ: dict[str, Any], start_response: Callable[..., Any]) -> Iterable[bytes]:
+        start_response("200 OK", [("Content-Type", "text/html")])
+        try:
+            raise RuntimeError("replace the response")
+        except RuntimeError:
+            start_response(
+                "500 Internal Server Error",
+                [("Content-Type", "text/plain")],
+                sys.exc_info(),
+            )
+        return [b"replacement"]
+
+    store = MemoryStore()
+    response = call(wrap(app, store=store))
+    assert response.status == "500 Internal Server Error"
+    assert response.one("Content-Type") == "text/plain"
+    assert response.body == b"replacement"
     assert store.data == {}
 
 
@@ -264,11 +343,57 @@ def test_convert_html_false_passes_html_through() -> None:
     assert response.one("Content-Type") == "text/html; charset=utf-8"
 
 
-def test_importing_the_wsgi_middleware_does_not_import_an_asgi_framework() -> None:
+def test_wsgi_export_is_discoverable_without_importing_an_asgi_framework() -> None:
     script = (
-        "import sys, md4a.wsgi\n"
+        "import sys, md4a\n"
+        "assert set(md4a.__all__) <= set(dir(md4a))\n"
+        "loaded = {'fastapi', 'starlette', 'httpx', 'uvicorn'} & set(sys.modules)\n"
+        "assert not loaded, loaded\n"
         "from md4a import MarkdownForAgentsWSGIMiddleware\n"
         "loaded = {'fastapi', 'starlette', 'httpx', 'uvicorn'} & set(sys.modules)\n"
         "assert not loaded, loaded\n"
     )
     subprocess.run([sys.executable, "-c", script], check=True)
+
+
+def test_immediate_passthrough_preserves_wsgi_file_wrapper() -> None:
+    class FileWrapper:
+        def __init__(self, filelike: BytesIO, block_size: int = 8192) -> None:
+            self.filelike = filelike
+            self.block_size = block_size
+
+        def __iter__(self) -> Iterator[bytes]:
+            return iter(lambda: self.filelike.read(self.block_size), b"")
+
+        def close(self) -> None:
+            self.filelike.close()
+
+    returned: dict[str, FileWrapper] = {}
+
+    def app(environ: dict[str, Any], start_response: Callable[..., Any]) -> Iterable[bytes]:
+        start_response(
+            "200 OK",
+            [("Content-Type", "application/octet-stream"), ("Content-Length", "4")],
+        )
+        wrapper = environ["wsgi.file_wrapper"](BytesIO(b"data"))
+        returned["wrapper"] = wrapper
+        return wrapper
+
+    environ: dict[str, Any] = {"REQUEST_METHOD": "GET", "HTTP_ACCEPT": "text/markdown"}
+    setup_testing_defaults(environ)
+    environ["wsgi.file_wrapper"] = FileWrapper
+    seen: dict[str, Any] = {}
+
+    def start_response(status: str, headers: Headers, exc_info: Any = None) -> Callable[..., None]:
+        seen.update(status=status, headers=headers)
+        return lambda data: None
+
+    result = MarkdownForAgentsWSGIMiddleware(app)(environ, start_response)
+    try:
+        assert result is returned["wrapper"]
+        assert b"".join(result) == b"data"
+    finally:
+        result.close()  # type: ignore[attr-defined]
+
+    assert seen["status"] == "200 OK"
+    assert ("Content-Type", "application/octet-stream") in seen["headers"]

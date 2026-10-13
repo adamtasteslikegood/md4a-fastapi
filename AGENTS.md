@@ -104,6 +104,11 @@ redirects, allowlists, size limits, error paths, and storage behavior.
 - Bound buffered response bodies and HTML conversion inputs. The middleware buffers
   only successful HTML/Markdown bodies up to `max_html_bytes`; other, streaming, and
   oversized responses must be forwarded as they arrive, unconverted and uncached.
+- For WSGI, preserve the application's original iterable when `start_response`
+  immediately establishes pass-through, especially `wsgi.file_wrapper`. Eligible
+  HTML/Markdown conversion buffers the complete response and does not preserve PEP
+  3333 asynchronous block-boundary scheduling; document that streaming HTML is not
+  a supported conversion path.
 - Treat filesystem paths and cache indexes as security-sensitive.
 - Never commit credentials, PyPI tokens, private URLs, or fetched private content.
 - Keep `pyproject.toml` version and `md4a.__version__` synchronized. Runtime consumers,

@@ -43,3 +43,8 @@ def __getattr__(name: str) -> Any:
         globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    """Include lazy public exports in module discovery before first access."""
+    return sorted(set(globals()) | set(__all__))
