@@ -5,7 +5,11 @@ Nothing here imports a web framework, so either middleware can use it alone.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from email.message import Message as EmailMessage
+
+from bs4 import BeautifulSoup
+from markdownify import markdownify
 
 # These describe the original HTML bytes and cannot be reused after conversion.
 HTML_REPRESENTATION_HEADERS = frozenset(
@@ -58,3 +62,23 @@ def vary_with_accept(values: list[str]) -> str:
     if "accept" not in {item.lower() for item in vary}:
         vary.append("Accept")
     return ", ".join(item for item in vary if item)
+
+
+def html_to_markdown(
+    html: str, *, content_selector: str | None = None, strip_selectors: Sequence[str] = ()
+) -> str:
+    """Convert an HTML document to Markdown, optionally only part of it.
+
+    ``strip_selectors`` are CSS selectors whose elements are removed first.
+    ``content_selector`` is a CSS selector; its first match is what gets
+    converted. A page it does not match is converted whole, so a template
+    without that element still yields Markdown rather than nothing.
+    """
+    if content_selector is None and not strip_selectors:
+        return markdownify(html, heading_style="ATX")
+    soup = BeautifulSoup(html, "html.parser")
+    for selector in strip_selectors:
+        for element in soup.select(selector):
+            element.decompose()
+    content = soup.select_one(content_selector) if content_selector else None
+    return markdownify(str(content if content is not None else soup), heading_style="ATX")

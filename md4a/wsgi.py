@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any
 from urllib.parse import quote
-
-from markdownify import markdownify
 
 from ._negotiation import (
     HTML_REPRESENTATION_HEADERS,
     MARKDOWN_CONTENT_TYPE,
     accepts_markdown,
     declared_charset,
+    html_to_markdown,
     vary_with_accept,
 )
 from .store import MemoryStore, Store
@@ -126,6 +125,8 @@ class MarkdownForAgentsWSGIMiddleware:
         convert_html: bool = True,
         max_html_bytes: int = 5_000_000,
         cache_responses: bool = True,
+        content_selector: str | None = None,
+        strip_selectors: Sequence[str] = (),
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -133,6 +134,8 @@ class MarkdownForAgentsWSGIMiddleware:
         self.convert_html = convert_html
         self.max_html_bytes = max_html_bytes
         self.cache_responses = cache_responses
+        self.content_selector = content_selector
+        self.strip_selectors = tuple(strip_selectors)
 
     def __call__(self, environ: Environ, start_response: StartResponse) -> Iterable[bytes]:
         if environ.get("REQUEST_METHOD") != "GET" or not accepts_markdown(
@@ -250,7 +253,11 @@ class MarkdownForAgentsWSGIMiddleware:
                 start_response(exchange.status, exchange.headers)
                 yield body
                 return
-            converted = markdownify(text, heading_style="ATX")
+            converted = html_to_markdown(
+                text,
+                content_selector=self.content_selector,
+                strip_selectors=self.strip_selectors,
+            )
             if self.cache_responses:
                 self.store.put(key, converted)
             yield self._start_markdown(start_response, converted, exchange.status, exchange.headers)

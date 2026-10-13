@@ -125,11 +125,25 @@ response headers. Use caching for public, non-personalized content, and keep
 authentication outside md4a: route-level authentication does not run on these
 shortcuts. See [middleware ordering](QUICKSTART.md#middleware-ordering-and-response-headers).
 
+### Converting only the content
+
+By default the whole HTML document is converted, navigation and footer included.
+`content_selector` is a CSS selector; only its first match is converted.
+`strip_selectors` are CSS selectors whose elements are removed first:
+
+```python
+add_md4a(app, content_selector="main", strip_selectors=[".related", "form"])
+```
+
+A page the content selector does not match is converted whole. Provider, cached,
+and application-authored Markdown are not affected.
+
 ## Flask and other WSGI applications
 
 `MarkdownForAgentsWSGIMiddleware` applies the same negotiation to a WSGI
 application. It takes the same `store`, `provider`, `convert_html`,
-`max_html_bytes`, and `cache_responses` options as `add_md4a`:
+`max_html_bytes`, `cache_responses`, `content_selector`, and `strip_selectors`
+options as `add_md4a`:
 
 ```python
 from flask import Flask

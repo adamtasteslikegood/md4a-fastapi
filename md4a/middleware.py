@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from fastapi import FastAPI
-from markdownify import markdownify
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -12,6 +11,7 @@ from ._negotiation import (
     MARKDOWN_CONTENT_TYPE,
     accepts_markdown,
     declared_charset,
+    html_to_markdown,
     vary_with_accept,
 )
 from .store import MemoryStore, Store
@@ -61,6 +61,8 @@ class MarkdownForAgentsMiddleware:
         convert_html: bool = True,
         max_html_bytes: int = 5_000_000,
         cache_responses: bool = True,
+        content_selector: str | None = None,
+        strip_selectors: Sequence[str] = (),
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -68,6 +70,8 @@ class MarkdownForAgentsMiddleware:
         self.convert_html = convert_html
         self.max_html_bytes = max_html_bytes
         self.cache_responses = cache_responses
+        self.content_selector = content_selector
+        self.strip_selectors = tuple(strip_selectors)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["method"] != "GET":
@@ -166,7 +170,11 @@ class MarkdownForAgentsMiddleware:
                 await send(start)
                 await send({"type": "http.response.body", "body": body})
                 return
-            converted = markdownify(text, heading_style="ATX")
+            converted = html_to_markdown(
+                text,
+                content_selector=self.content_selector,
+                strip_selectors=self.strip_selectors,
+            )
             if self.cache_responses:
                 self.store.put(key, converted)
             await self._send_markdown(
@@ -211,6 +219,8 @@ def add_md4a(
     convert_html: bool = True,
     max_html_bytes: int = 5_000_000,
     cache_responses: bool = True,
+    content_selector: str | None = None,
+    strip_selectors: Sequence[str] = (),
 ) -> None:
     """Add Markdown-for-Agents negotiation to an existing FastAPI app."""
     app.add_middleware(
@@ -220,4 +230,6 @@ def add_md4a(
         convert_html=convert_html,
         max_html_bytes=max_html_bytes,
         cache_responses=cache_responses,
+        content_selector=content_selector,
+        strip_selectors=strip_selectors,
     )
