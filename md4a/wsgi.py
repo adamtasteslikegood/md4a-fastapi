@@ -37,11 +37,13 @@ def _declared_length(headers: HeaderList) -> int:
 
 
 def _request_key(environ: Environ) -> str:
-    # WSGI decodes the path as latin-1; quoting it the same way restores the
-    # percent-encoded form the client sent, which is what the ASGI key uses.
+    # WSGI decodes the path as latin-1; quoting it the same way gives back a
+    # percent-encoded path like the one the ASGI key uses. The server's decoding
+    # loses which characters the client escaped, so the characters RFC 3986
+    # allows unescaped in a path segment are left as they are.
     path = quote(
         environ.get("SCRIPT_NAME", "") + environ.get("PATH_INFO", ""),
-        safe="/;=,",
+        safe="/:@!$&'()*+,;=",
         encoding="latin-1",
     )
     query = environ.get("QUERY_STRING", "")

@@ -37,11 +37,18 @@ __all__ = [
 ]
 
 
+# Importing these eagerly used to make them attributes of the package, so
+# ``md4a.store.MemoryStore`` keeps working after ``import md4a`` alone.
+_SUBMODULES = frozenset({"client", "middleware", "store", "wsgi"})
+
+
 def __getattr__(name: str) -> Any:
     if name in _EXPORTS:
         value = getattr(import_module(_EXPORTS[name], __name__), name)
         globals()[name] = value
         return value
+    if name in _SUBMODULES:
+        return import_module(f".{name}", __name__)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

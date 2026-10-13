@@ -316,6 +316,24 @@ def test_cache_key_is_the_encoded_path_and_query() -> None:
     assert list(store.data) == ["/caf%C3%A9%20au%20lait?page=2"]
 
 
+def test_cache_key_leaves_path_segment_characters_unescaped() -> None:
+    store = MemoryStore()
+    call(wrap(page(), store=store), "/r/a:b+c@d/(e)!$&'*,;=~")
+    assert list(store.data) == ["/r/a:b+c@d/(e)!$&'*,;=~"]
+
+
+def test_submodules_are_attributes_of_the_package_without_an_explicit_import() -> None:
+    script = (
+        "import sys, md4a\n"
+        "assert md4a.store.MemoryStore is md4a.MemoryStore\n"
+        "assert md4a.wsgi.MarkdownForAgentsWSGIMiddleware\n"
+        "loaded = {'fastapi', 'starlette', 'httpx', 'uvicorn'} & set(sys.modules)\n"
+        "assert not loaded, loaded\n"
+        "assert md4a.client.MarkdownForAgentsClient and md4a.middleware.add_md4a\n"
+    )
+    subprocess.run([sys.executable, "-c", script], check=True)
+
+
 def test_cached_markdown_is_served_on_the_next_request() -> None:
     calls = 0
 
