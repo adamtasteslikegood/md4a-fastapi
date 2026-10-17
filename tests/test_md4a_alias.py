@@ -21,17 +21,13 @@ def test_alias_version_matches_the_package_version() -> None:
     assert project()["version"] == md4a.__version__
 
 
-def test_alias_pins_md4a_fastapi_to_the_same_version() -> None:
-    pinned = f"=={md4a.__version__}"
-    requirements = project()["dependencies"] + [
-        requirement
-        for extra in project()["optional-dependencies"].values()
-        for requirement in extra
-    ]
-    assert requirements
-    for requirement in requirements:
-        assert requirement.startswith("md4a-fastapi"), requirement
-        assert requirement.endswith(pinned), requirement
+def test_alias_depends_on_md4a_fastapi_at_the_same_version() -> None:
+    assert project()["dependencies"] == [f"md4a-fastapi=={md4a.__version__}"]
+
+
+def test_each_alias_extra_installs_the_same_md4a_fastapi_extra() -> None:
+    for extra, requirements in project()["optional-dependencies"].items():
+        assert requirements == [f"md4a-fastapi[{extra}]=={md4a.__version__}"], extra
 
 
 def test_alias_offers_the_same_extras_as_md4a_fastapi() -> None:
