@@ -11,10 +11,33 @@ permissions:
 jobs:
   build:
     name: Build release distributions
+    # Publish only from a published release or a manual run on main, never from
+    # a manual run on another branch. The publish job needs this one, so it is
+    # skipped too.
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check the commit is on main
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$(git rev-parse --short HEAD) is not on main; release from a commit on main."
+            exit 1
+          fi
+      - name: Check the release tag matches the package version
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' md4a/__init__.py)
+          if [ -z "$version" ] || [ "${TAG#v}" != "$version" ]; then
+            echo "::error::Release tag $TAG does not match package version ${version:-unknown}."
+            exit 1
+          fi
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
