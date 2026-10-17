@@ -3,12 +3,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import httpx
 from fastapi import FastAPI, HTTPException, Query, Response
 
 from . import __version__
-from .client import MarkdownForAgentsClient
+from ._extras import require_server_extra
 from .store import FileStore
+
+try:
+    import httpx
+
+    from .client import MarkdownForAgentsClient
+except ImportError as exc:
+    raise require_server_extra("The standalone md4a service", exc) from exc
 
 
 def create_app() -> FastAPI:

@@ -8,10 +8,14 @@ from dataclasses import dataclass
 from types import TracebackType
 from urllib.parse import urlparse
 
-import anyio
-import httpx
-
 from . import __version__
+from ._extras import require_server_extra
+
+try:
+    import anyio
+    import httpx
+except ImportError as exc:
+    raise require_server_extra("md4a.client", exc) from exc
 
 MARKDOWN_ACCEPT = "text/markdown"
 

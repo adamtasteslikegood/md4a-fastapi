@@ -13,7 +13,11 @@ and stores verified or converted Markdown in memory or on disk.
 - Python import and CLI: `md4a`
 - Runtime: Python 3.11 through 3.14
 - Framework: FastAPI/Starlette ASGI; a WSGI middleware covers Flask and similar apps
-- Build backend: Hatchling
+- Build backend: Hatchling; the version is read from `md4a/__init__.py`
+- Dependencies: the base install is what the middlewares need (`beautifulsoup4`,
+  `markdownify`, `fastapi`). The `server` extra adds `httpx`, `anyio`, and `uvicorn` for
+  `client`, `app`, and `cli`. Keep server-only imports out of the middleware modules;
+  CI's base-install job checks this.
 - License: MIT
 
 ## Repository map
@@ -23,13 +27,16 @@ and stores verified or converted Markdown in memory or on disk.
 - `md4a/wsgi.py` — `MarkdownForAgentsWSGIMiddleware`, the same behavior for WSGI
   applications. It must not import FastAPI, Starlette, or httpx.
 - `md4a/_negotiation.py` — framework-neutral `Accept` parsing, charset lookup, `Vary`
-  merging, and the HTML representation headers; shared by both middlewares.
+  merging, the HTML representation headers, and HTML-to-Markdown conversion (content
+  and strip selectors, `escape_misc`, literal code spans); shared by both middlewares.
 - `md4a/client.py` — requests remote URLs with `Accept: text/markdown`; validates
   schemes, redirects, host allowlists, status codes, media type, and response size.
 - `md4a/store.py` — `MemoryStore`, filesystem-backed `FileStore`, and the store protocol.
   Both stores support `ttl`, `delete`, and `clear`; the protocol itself is `get`/`put`.
 - `md4a/app.py` — standalone FastAPI application with `/health` and `/fetch`.
 - `md4a/cli.py` — `md4a fetch` and `md4a serve` commands.
+- `md4a/_extras.py` — the error raised when `client`, `app`, or `cli` is used without
+  the `server` extra installed.
 - `md4a/__init__.py` — public exports, loaded on first use so that `md4a.wsgi` does not
   pull in the ASGI stack, and the canonical runtime `__version__`.
 - `tests/` — unit and integration-style tests using pytest and FastAPI TestClient.

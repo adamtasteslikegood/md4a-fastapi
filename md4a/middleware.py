@@ -63,6 +63,8 @@ class MarkdownForAgentsMiddleware:
         cache_responses: bool = True,
         content_selector: str | None = None,
         strip_selectors: Sequence[str] = (),
+        escape_misc: bool = False,
+        literal_selectors: Sequence[str] = (),
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -72,6 +74,8 @@ class MarkdownForAgentsMiddleware:
         self.cache_responses = cache_responses
         self.content_selector = content_selector
         self.strip_selectors = tuple(strip_selectors)
+        self.escape_misc = escape_misc
+        self.literal_selectors = tuple(literal_selectors)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["method"] != "GET":
@@ -174,6 +178,8 @@ class MarkdownForAgentsMiddleware:
                 text,
                 content_selector=self.content_selector,
                 strip_selectors=self.strip_selectors,
+                escape_misc=self.escape_misc,
+                literal_selectors=self.literal_selectors,
             )
             if self.cache_responses:
                 self.store.put(key, converted)
@@ -221,6 +227,8 @@ def add_md4a(
     cache_responses: bool = True,
     content_selector: str | None = None,
     strip_selectors: Sequence[str] = (),
+    escape_misc: bool = False,
+    literal_selectors: Sequence[str] = (),
 ) -> None:
     """Add Markdown-for-Agents negotiation to an existing FastAPI app."""
     app.add_middleware(
@@ -232,4 +240,6 @@ def add_md4a(
         cache_responses=cache_responses,
         content_selector=content_selector,
         strip_selectors=strip_selectors,
+        escape_misc=escape_misc,
+        literal_selectors=literal_selectors,
     )
