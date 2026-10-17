@@ -324,12 +324,15 @@ def test_cache_key_leaves_path_segment_characters_unescaped() -> None:
 
 def test_submodules_are_attributes_of_the_package_without_an_explicit_import() -> None:
     script = (
-        "import sys, md4a\n"
+        "import importlib.util, sys, md4a\n"
         "assert md4a.store.MemoryStore is md4a.MemoryStore\n"
         "assert md4a.wsgi.MarkdownForAgentsWSGIMiddleware\n"
         "loaded = {'fastapi', 'starlette', 'httpx', 'uvicorn'} & set(sys.modules)\n"
         "assert not loaded, loaded\n"
-        "assert md4a.client.MarkdownForAgentsClient and md4a.middleware.add_md4a\n"
+        "assert md4a.middleware.add_md4a\n"
+        # md4a.client needs the server extra, which a base install leaves out.
+        "if importlib.util.find_spec('httpx'):\n"
+        "    assert md4a.client.MarkdownForAgentsClient\n"
     )
     subprocess.run([sys.executable, "-c", script], check=True)
 

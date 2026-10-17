@@ -5,10 +5,18 @@ import asyncio
 import os
 import sys
 
-import httpx
-import uvicorn
+from ._extras import require_server_extra
 
-from .client import MarkdownForAgentsClient
+try:
+    import httpx
+    import uvicorn
+
+    from .client import MarkdownForAgentsClient
+except ImportError as exc:
+    # Reported by main() so the md4a command prints one line, not a traceback.
+    _missing_extra: ModuleNotFoundError | None = require_server_extra("The md4a command", exc)
+else:
+    _missing_extra = None
 
 
 def parser() -> argparse.ArgumentParser:
@@ -74,6 +82,8 @@ async def _fetch(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> None:
     args = parser().parse_args(argv)
+    if _missing_extra is not None:
+        raise SystemExit(f"md4a: {_missing_extra}")
     if args.command == "serve":
         uvicorn.run("md4a.app:app", host=args.host, port=args.port)
     else:

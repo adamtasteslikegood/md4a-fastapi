@@ -27,7 +27,25 @@ responses.
 
 ## Installation
 
-The package has not been published to PyPI yet. For local development:
+```bash
+python -m pip install md4a-fastapi             # FastAPI and Flask middleware
+python -m pip install 'md4a-fastapi[server]'   # adds the md4a command, client, and service
+```
+
+With uv, use `uv add md4a-fastapi` or `uv pip install md4a-fastapi` the same way.
+
+| Install | What you get | Extra dependencies |
+| --- | --- | --- |
+| `md4a-fastapi` | ASGI and WSGI middleware, content stores | `beautifulsoup4`, `markdownify`, `fastapi` |
+| `md4a-fastapi[server]` | also the remote client, standalone service, `md4a` command | `httpx`, `anyio`, `uvicorn[standard]` |
+| `md4a-fastapi[flask]` | the same as the base install | none |
+
+The WSGI middleware needs nothing beyond the base install and never imports
+FastAPI, so a Flask application can use the base install as it is. `[flask]` and
+`[wsgi]` are accepted as names for it. Without the server extra, importing
+`md4a.client` or running `md4a` says which package to install.
+
+### Development setup
 
 Using [uv](https://docs.astral.sh/uv/) (recommended):
 
@@ -53,20 +71,6 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[test]'
-```
-
-After the first release:
-
-With uv:
-
-```bash
-uv pip install md4a-fastapi
-```
-
-With pip:
-
-```bash
-python -m pip install md4a-fastapi
 ```
 
 ## FastAPI middleware
@@ -138,12 +142,34 @@ add_md4a(app, content_selector="main", strip_selectors=[".related", "form"])
 A page the content selector does not match is converted whole. Provider, cached,
 and application-authored Markdown are not affected.
 
+### Escaping untrusted text
+
+Text on a page can contain Markdown syntax that an agent would read as a link or
+image, for example a user comment such as `[Free coupons](https://evil.example)`.
+Two options keep such text inert. Both are off by default.
+
+```python
+add_md4a(app, escape_misc=True, literal_selectors=['[data-md="plain"]'])
+```
+
+- `escape_misc=True` escapes Markdown punctuation (`[`, `]`, `#`, `>`, and the
+  like) in all page text, so it cannot form links, images, or headings. Some
+  text gains backslashes, which Markdown readers drop.
+- `literal_selectors` are CSS selectors for elements whose text is emitted as an
+  inline code span. Escaping does not stop bare URLs and email addresses from
+  being linked, but nothing inside a code span is, so use this for user-written
+  text. Whitespace is collapsed to single spaces and nested markup is kept as text.
+  A matched link, image, or code element is replaced by the span, so its own
+  syntax cannot wrap the text; in a table cell, pipes are escaped.
+
+Use the two together: without `escape_misc`, a stray backtick in the page's own
+text can open a code span that runs into the literal one. Both options work the
+same in the WSGI middleware.
+
 ## Flask and other WSGI applications
 
 `MarkdownForAgentsWSGIMiddleware` applies the same negotiation to a WSGI
-application. It takes the same `store`, `provider`, `convert_html`,
-`max_html_bytes`, `cache_responses`, `content_selector`, and `strip_selectors`
-options as `add_md4a`:
+application. It takes the same options as `add_md4a`:
 
 ```python
 from flask import Flask
@@ -167,8 +193,8 @@ responses pass through. The cache key is the percent-encoded `SCRIPT_NAME` plus
 
 A response the application sends through the legacy `write()` callable passes
 through unconverted. Importing `md4a.wsgi`, or `MarkdownForAgentsWSGIMiddleware`
-from `md4a`, does not import FastAPI or Starlette, although both are still
-installed as dependencies of the package.
+from `md4a`, does not import FastAPI or Starlette, although the base install
+still includes them.
 
 Use WSGI conversion for ordinary buffered page responses, not streaming HTML
 iterables. The middleware must see the complete eligible body before it can choose
@@ -205,6 +231,8 @@ add_md4a(app, cache_responses=False)  # convert every request
   in the store, and provider content, is still served.
 
 ## Remote discovery and standalone service
+
+These need the server extra: `python -m pip install 'md4a-fastapi[server]'`.
 
 With the uv-managed project environment, run the CLI with `uv run`:
 

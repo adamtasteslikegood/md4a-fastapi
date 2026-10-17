@@ -127,6 +127,8 @@ class MarkdownForAgentsWSGIMiddleware:
         cache_responses: bool = True,
         content_selector: str | None = None,
         strip_selectors: Sequence[str] = (),
+        escape_misc: bool = False,
+        literal_selectors: Sequence[str] = (),
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -136,6 +138,8 @@ class MarkdownForAgentsWSGIMiddleware:
         self.cache_responses = cache_responses
         self.content_selector = content_selector
         self.strip_selectors = tuple(strip_selectors)
+        self.escape_misc = escape_misc
+        self.literal_selectors = tuple(literal_selectors)
 
     def __call__(self, environ: Environ, start_response: StartResponse) -> Iterable[bytes]:
         if environ.get("REQUEST_METHOD") != "GET" or not accepts_markdown(
@@ -257,6 +261,8 @@ class MarkdownForAgentsWSGIMiddleware:
                 text,
                 content_selector=self.content_selector,
                 strip_selectors=self.strip_selectors,
+                escape_misc=self.escape_misc,
+                literal_selectors=self.literal_selectors,
             )
             if self.cache_responses:
                 self.store.put(key, converted)

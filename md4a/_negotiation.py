@@ -5,11 +5,16 @@ Nothing here imports a web framework, so either middleware can use it alone.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from email.message import Message as EmailMessage
+from typing import Any
 
 from bs4 import BeautifulSoup
-from markdownify import markdownify
+from markdownify import MarkdownConverter
+
+# A tag name no page uses; markdownify calls convert_<name> for it.
+_LITERAL_TAG = "md4aliteral"
 
 # These describe the original HTML bytes and cannot be reused after conversion.
 HTML_REPRESENTATION_HEADERS = frozenset(
@@ -64,8 +69,68 @@ def vary_with_accept(values: list[str]) -> str:
     return ", ".join(item for item in vary if item)
 
 
+# Matched elements whose Markdown only adds block structure around their content
+# keep their tag; any other match (a link, an image, inline formatting, code) is
+# replaced, so its own Markdown syntax cannot wrap the literal text.
+_LITERAL_CONTAINERS = frozenset(
+    {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "caption",
+        "dd",
+        "div",
+        "dt",
+        "figcaption",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "li",
+        "main",
+        "nav",
+        "p",
+        "section",
+        "td",
+        "th",
+    }
+)
+
+
+def _code_span(text: str, *, in_table: bool = False) -> str:
+    """Text as an inline code span that no Markdown in it can escape from."""
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    if in_table:
+        # Table rows are split into cells before code spans are parsed, so a
+        # pipe must be escaped even inside one; GFM shows "\|" there as "|".
+        text = text.replace("|", "\\|")
+    # A fence longer than any backtick run in the text, padded with a space on
+    # each side so text that starts or ends with a backtick cannot join it.
+    fence = "`" * (max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
+    # The spaces outside the fences keep them from joining a backtick next to
+    # the span, including the fence of an adjacent literal span.
+    return f" {fence} {text} {fence} "
+
+
+class _Converter(MarkdownConverter):
+    def convert_md4aliteral(self, el: Any, text: str, *args: Any, **kwargs: Any) -> str:
+        return _code_span(el.get_text(), in_table=el.find_parent(["td", "th"]) is not None)
+
+
 def html_to_markdown(
-    html: str, *, content_selector: str | None = None, strip_selectors: Sequence[str] = ()
+    html: str,
+    *,
+    content_selector: str | None = None,
+    strip_selectors: Sequence[str] = (),
+    escape_misc: bool = False,
+    literal_selectors: Sequence[str] = (),
 ) -> str:
     """Convert an HTML document to Markdown, optionally only part of it.
 
@@ -73,12 +138,32 @@ def html_to_markdown(
     ``content_selector`` is a CSS selector; its first match is what gets
     converted. A page it does not match is converted whole, so a template
     without that element still yields Markdown rather than nothing.
+
+    ``escape_misc`` escapes Markdown punctuation in page text (``[``, ``]``,
+    ``#``, ``>`` and the like) so it reads as text, not as links or headings.
+    ``literal_selectors`` are CSS selectors whose elements' text is emitted as
+    an inline code span: shown as written, with nothing in it rendered as a
+    link, image, or autolink. Use it for untrusted text such as user comments,
+    together with ``escape_misc`` so a stray backtick in the page's own text
+    cannot open a code span that runs into the literal one.
     """
-    if content_selector is None and not strip_selectors:
-        return markdownify(html, heading_style="ATX")
+    converter = _Converter(heading_style="ATX", escape_misc=escape_misc)
+    if content_selector is None and not strip_selectors and not literal_selectors:
+        return converter.convert(html)
     soup = BeautifulSoup(html, "html.parser")
     for selector in strip_selectors:
         for element in soup.select(selector):
             element.decompose()
+    for selector in literal_selectors:
+        for element in soup.select(selector):
+            if element.parent is None:
+                continue  # inside an element already made literal
+            literal = soup.new_tag(_LITERAL_TAG)
+            literal.string = element.get_text()
+            if element.name in _LITERAL_CONTAINERS:
+                element.clear()
+                element.append(literal)
+            else:
+                element.replace_with(literal)
     content = soup.select_one(content_selector) if content_selector else None
-    return markdownify(str(content if content is not None else soup), heading_style="ATX")
+    return converter.convert(str(content if content is not None else soup))

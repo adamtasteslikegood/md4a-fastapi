@@ -53,9 +53,32 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+  base-install:
+    name: Base install (no extras)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install the package without extras
+        run: python -m pip install --upgrade pip && python -m pip install . pytest
+      - name: Check the server dependencies are not installed
+        run: >-
+          python -c "import importlib.util, sys;
+          found = [m for m in ('httpx', 'uvicorn') if importlib.util.find_spec(m)];
+          sys.exit(f'server dependencies installed: {found}' if found else 0)"
+      - name: Run the WSGI middleware tests
+        run: python -m pytest -q tests/test_wsgi.py
+      - name: Check the md4a command names the server extra
+        run: md4a fetch https://example.com/ 2>&1 | grep -F "md4a-fastapi[server]"
+
   package:
     name: Build package
-    needs: [lint, test]
+    needs: [lint, test, base-install]
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
