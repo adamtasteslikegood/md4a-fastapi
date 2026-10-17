@@ -37,9 +37,11 @@ First release.
 - Converted responses keep application headers, including repeated `Set-Cookie`;
   md4a recalculates the content type and length, merges `Accept` into `Vary`, and
   drops validators, digests, and range metadata that described the HTML bytes.
-- Only successful HTML and Markdown responses are buffered, up to `max_html_bytes`
-  (5 MB by default). Compressed, partial, trailer-bearing, streaming, and oversized
-  responses pass through unconverted and uncached.
+- Only successful HTML and Markdown bodies are buffered, up to `max_html_bytes`
+  (5 MB by default). Other media types and compressed, partial, oversized, and
+  (ASGI) trailer-bearing responses pass through unconverted and uncached. A
+  streamed HTML or Markdown body is held until it ends or reaches the limit, so
+  conversion does not preserve chunk timing.
 - Bodies are decoded with the charset declared in `Content-Type`; a response that
   cannot be decoded is returned unchanged and is not cached.
 
