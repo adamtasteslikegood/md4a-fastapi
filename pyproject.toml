@@ -47,6 +47,7 @@ server = [
 flask = []
 wsgi = []
 test = [
+  "markdown-it-py>=3,<5",
   "md4a-fastapi[server]",
   "pytest>=8,<10",
   "ruff>=0.12,<1",

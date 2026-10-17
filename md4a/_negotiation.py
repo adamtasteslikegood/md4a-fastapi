@@ -69,20 +69,59 @@ def vary_with_accept(values: list[str]) -> str:
     return ", ".join(item for item in vary if item)
 
 
-def _code_span(text: str) -> str:
+# Matched elements whose Markdown only adds block structure around their content
+# keep their tag; any other match (a link, an image, inline formatting, code) is
+# replaced, so its own Markdown syntax cannot wrap the literal text.
+_LITERAL_CONTAINERS = frozenset(
+    {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "caption",
+        "dd",
+        "div",
+        "dt",
+        "figcaption",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "li",
+        "main",
+        "nav",
+        "p",
+        "section",
+        "td",
+        "th",
+    }
+)
+
+
+def _code_span(text: str, *, in_table: bool = False) -> str:
     """Text as an inline code span that no Markdown in it can escape from."""
     text = " ".join(text.split())
     if not text:
         return ""
+    if in_table:
+        # Table rows are split into cells before code spans are parsed, so a
+        # pipe must be escaped even inside one; GFM shows "\|" there as "|".
+        text = text.replace("|", "\\|")
     # A fence longer than any backtick run in the text, padded with a space on
     # each side so text that starts or ends with a backtick cannot join it.
     fence = "`" * (max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
-    return f"{fence} {text} {fence}"
+    # The spaces outside the fences keep them from joining a backtick next to
+    # the span, including the fence of an adjacent literal span.
+    return f" {fence} {text} {fence} "
 
 
 class _Converter(MarkdownConverter):
     def convert_md4aliteral(self, el: Any, text: str, *args: Any, **kwargs: Any) -> str:
-        return _code_span(el.get_text())
+        return _code_span(el.get_text(), in_table=el.find_parent(["td", "th"]) is not None)
 
 
 def html_to_markdown(
@@ -104,7 +143,9 @@ def html_to_markdown(
     ``#``, ``>`` and the like) so it reads as text, not as links or headings.
     ``literal_selectors`` are CSS selectors whose elements' text is emitted as
     an inline code span: shown as written, with nothing in it rendered as a
-    link, image, or autolink. Use it for untrusted text such as user comments.
+    link, image, or autolink. Use it for untrusted text such as user comments,
+    together with ``escape_misc`` so a stray backtick in the page's own text
+    cannot open a code span that runs into the literal one.
     """
     converter = _Converter(heading_style="ATX", escape_misc=escape_misc)
     if content_selector is None and not strip_selectors and not literal_selectors:
@@ -115,9 +156,14 @@ def html_to_markdown(
             element.decompose()
     for selector in literal_selectors:
         for element in soup.select(selector):
+            if element.parent is None:
+                continue  # inside an element already made literal
             literal = soup.new_tag(_LITERAL_TAG)
             literal.string = element.get_text()
-            element.clear()
-            element.append(literal)
+            if element.name in _LITERAL_CONTAINERS:
+                element.clear()
+                element.append(literal)
+            else:
+                element.replace_with(literal)
     content = soup.select_one(content_selector) if content_selector else None
     return converter.convert(str(content if content is not None else soup))

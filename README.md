@@ -159,8 +159,12 @@ add_md4a(app, escape_misc=True, literal_selectors=['[data-md="plain"]'])
   inline code span. Escaping does not stop bare URLs and email addresses from
   being linked, but nothing inside a code span is, so use this for user-written
   text. Whitespace is collapsed to single spaces and nested markup is kept as text.
+  A matched link, image, or code element is replaced by the span, so its own
+  syntax cannot wrap the text; in a table cell, pipes are escaped.
 
-Both options work the same in the WSGI middleware.
+Use the two together: without `escape_misc`, a stray backtick in the page's own
+text can open a code span that runs into the literal one. Both options work the
+same in the WSGI middleware.
 
 ## Flask and other WSGI applications
 
