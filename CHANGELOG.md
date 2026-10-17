@@ -1,0 +1,56 @@
+# Changelog
+
+All notable changes to `md4a-fastapi` are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[Semantic Versioning](https://semver.org/). Until 1.0, minor versions may change
+the API.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-10-17
+
+First release.
+
+### Added
+
+- `MarkdownForAgentsMiddleware` and `add_md4a` for FastAPI and other ASGI apps:
+  a `GET` request that accepts `text/markdown` gets a successful HTML response
+  converted to Markdown, cached by path and query string; everything else passes
+  through unchanged.
+- `MarkdownForAgentsWSGIMiddleware` for Flask and other WSGI apps, with the same
+  options and rules. Importing it does not import FastAPI, Starlette, or httpx.
+- A synchronous `provider` hook for hand-written Markdown, served ahead of conversion.
+- `MemoryStore` and `FileStore`, with `ttl`, `delete`, and `clear`, and
+  `max_entries` for `MemoryStore`. `cache_responses=False` stops writing
+  responses to the store.
+- `content_selector` and `strip_selectors` to convert only the page content.
+- `escape_misc` and `literal_selectors` (both off by default) to keep untrusted
+  text, such as user comments, from becoming links or images in the Markdown.
+- `MarkdownForAgentsClient` for remote discovery: sends `Accept: text/markdown`,
+  accepts only `text/markdown` responses, and checks schemes, redirects, host
+  allowlists, timeouts, response size, and non-public destination addresses.
+- A standalone FastAPI service (`/health`, `/fetch`) and the `md4a fetch` and
+  `md4a serve` commands.
+
+### Behavior
+
+- Converted responses keep application headers, including repeated `Set-Cookie`;
+  md4a recalculates the content type and length, merges `Accept` into `Vary`, and
+  drops validators, digests, and range metadata that described the HTML bytes.
+- Only successful HTML and Markdown responses are buffered, up to `max_html_bytes`
+  (5 MB by default). Compressed, partial, trailer-bearing, streaming, and oversized
+  responses pass through unconverted and uncached.
+- Bodies are decoded with the charset declared in `Content-Type`; a response that
+  cannot be decoded is returned unchanged and is not cached.
+
+### Packaging
+
+- The base install (`beautifulsoup4`, `markdownify`, `fastapi`) covers both
+  middlewares and the stores. The `server` extra adds `httpx`, `anyio`, and
+  `uvicorn[standard]` for the client, the service, and the `md4a` command, which
+  say how to install it when it is missing. `flask` and `wsgi` are names for the
+  base install.
+- Python 3.11 to 3.14. Typed (`py.typed`).
+
+[Unreleased]: https://github.com/adamtasteslikegood/md4a-fastapi/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/adamtasteslikegood/md4a-fastapi/releases/tag/v0.1.0

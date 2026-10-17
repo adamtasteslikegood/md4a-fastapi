@@ -58,6 +58,7 @@ test = [
 md4a = "md4a.cli:main"
 
 [project.urls]
+Changelog = "https://github.com/adamtasteslikegood/md4a-fastapi/blob/main/CHANGELOG.md"
 Documentation = "https://github.com/adamtasteslikegood/md4a-fastapi#readme"
 Issues = "https://github.com/adamtasteslikegood/md4a-fastapi/issues"
 Repository = "https://github.com/adamtasteslikegood/md4a-fastapi"
@@ -69,7 +70,7 @@ testpaths = ["tests"]
 path = "md4a/__init__.py"
 
 [tool.hatch.build.targets.sdist]
-include = ["/md4a", "/tests", "/README.md", "/LICENSE", "/pyproject.toml"]
+include = ["/md4a", "/tests", "/CHANGELOG.md", "/README.md", "/LICENSE", "/pyproject.toml"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["md4a"]

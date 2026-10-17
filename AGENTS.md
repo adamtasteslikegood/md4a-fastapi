@@ -42,6 +42,7 @@ and stores verified or converted Markdown in memory or on disk.
 - `tests/` — unit and integration-style tests using pytest and FastAPI TestClient.
 - `.github/workflows/` — CI, CodeQL, and PyPI publishing automation.
 - `README.md`, `QUICKSTART.md` — user installation and usage documentation.
+- `CHANGELOG.md` — release notes; add user-visible changes under `Unreleased`.
 - `CONTRIBUTING.md`, `SECURITY.md` — contributor and vulnerability guidance.
 
 ## Request and content flow
@@ -162,9 +163,13 @@ Before a release:
 
 1. Confirm the PyPI Trusted Publisher matches owner `adamtasteslikegood`, repository
    `md4a-fastapi`, workflow `publish.yml`, and environment `pypi`.
-2. Update both version declarations and release notes.
+2. In a `release/vX.Y.Z` pull request, set `__version__` in `md4a/__init__.py` (the
+   build reads the version from there) and move the `CHANGELOG.md` `Unreleased`
+   entries under a dated `## [X.Y.Z]` heading.
 3. Run the complete local suite and confirm required PR checks and security scans.
-4. Merge through protected `main`, then publish the GitHub Release.
+4. Merge through protected `main`, then publish a GitHub Release with a new tag
+   `vX.Y.Z` targeting `main`. `publish.yml` rejects commits not on `main` and tags
+   that do not match `__version__`; the `pypi` environment waits for approval.
 5. Verify the actual PyPI project, artifacts, metadata, and installation afterward.
 
 ## Documentation maintenance

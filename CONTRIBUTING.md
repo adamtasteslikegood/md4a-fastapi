@@ -70,9 +70,22 @@ Maintainers use squash merges so the pull request title becomes the commit on
 
 ## Releases
 
-Releases are built from GitHub release tags matching `v*`. The publish workflow
-uses PyPI Trusted Publishing and a protected GitHub environment named `pypi`.
-Maintainers must verify the package version, changelog/release notes, CI status,
-and built artifacts before creating a release.
+Add user-visible changes under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md)
+as part of each pull request.
+
+To release, a maintainer:
+
+1. Opens a `release/vX.Y.Z` pull request to `main` that sets `__version__` in
+   `md4a/__init__.py` (the only version declaration) and moves the `Unreleased`
+   entries under a dated `## [X.Y.Z]` heading.
+2. Merges it once CI is green.
+3. Publishes a GitHub release whose new tag `vX.Y.Z` targets `main`, using the
+   changelog section as the release notes.
+4. Approves the `pypi` environment deployment after checking the built
+   `release-distributions` artifact.
+
+The publish workflow refuses a commit that is not on `main` and a tag that does
+not match `__version__`. It uses PyPI Trusted Publishing through the protected
+`pypi` GitHub environment.
 
 Do not add API tokens to the repository or workflow files.
