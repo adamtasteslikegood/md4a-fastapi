@@ -33,6 +33,8 @@ python -m pip install 'md4a-fastapi[server]'   # adds the md4a command, client, 
 ```
 
 With uv, use `uv add md4a-fastapi` or `uv pip install md4a-fastapi` the same way.
+`pip install md4a` is the same install under a shorter name: the `md4a`
+distribution depends on `md4a-fastapi` at the same version and adds no code.
 
 | Install | What you get | Extra dependencies |
 | --- | --- | --- |

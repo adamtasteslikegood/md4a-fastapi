@@ -91,9 +91,18 @@ jobs:
       - name: Install build tools
         run: python -m pip install --upgrade build twine
       - name: Build distributions
-        run: python -m build
+        run: python -m build && python -m build meta/md4a --outdir dist
       - name: Validate distributions
         run: python -m twine check dist/*
+      - name: Install the md4a alias with the built md4a-fastapi
+        # -I keeps the checkout off sys.path, so md4a must come from the venv.
+        run: |
+          python -m venv /tmp/alias
+          /tmp/alias/bin/pip install dist/md4a-*.whl dist/md4a_fastapi-*.whl
+          probe='import md4a, sysconfig; from md4a import MarkdownForAgentsWSGIMiddleware, add_md4a; assert md4a.__file__.startswith(sysconfig.get_path("purelib")), md4a.__file__'
+          /tmp/alias/bin/python -I -c "$probe"
+          /tmp/alias/bin/pip uninstall --yes md4a
+          /tmp/alias/bin/python -I -c "$probe"
       - name: Upload distributions
         uses: actions/upload-artifact@v7
         with:

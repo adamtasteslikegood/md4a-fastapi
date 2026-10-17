@@ -1,0 +1,39 @@
+# The "md4a" distribution installs md4a-fastapi at the same version and adds no
+# code of its own. It is released with md4a-fastapi by publish.yml, and
+# tests/test_md4a_alias.py fails if its version or pins drift from md4a/__init__.py.
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "md4a"
+version = "0.1.0"
+description = "Markdown for Agents content negotiation for FastAPI, Flask, and other WSGI apps (installs md4a-fastapi)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["agents", "ai", "asgi", "fastapi", "flask", "markdown", "wsgi"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Framework :: Flask",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+]
+dependencies = ["md4a-fastapi==0.1.0"]
+
+[project.optional-dependencies]
+server = ["md4a-fastapi[server]==0.1.0"]
+flask = ["md4a-fastapi[flask]==0.1.0"]
+wsgi = ["md4a-fastapi[wsgi]==0.1.0"]
+
+[project.urls]
+Changelog = "https://github.com/adamtasteslikegood/md4a-fastapi/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/adamtasteslikegood/md4a-fastapi#readme"
+Repository = "https://github.com/adamtasteslikegood/md4a-fastapi"
+
+# No modules: the md4a import package comes from md4a-fastapi.
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
