@@ -7,6 +7,8 @@ the API.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-18
+
 ### Changed
 
 - Both middlewares add `Accept` to `Vary` on every `GET`/`HEAD` response whose media
@@ -25,7 +27,8 @@ the API.
   Cloudflare setups (no HTML caching, bypass for Markdown requests, or the Cache
   Rules Vary setting). (#46)
 - The `md4a` distribution on PyPI: `pip install md4a` installs `md4a-fastapi` at the
-  same version (extras included) and adds no code. Both are released together.
+  same version (extras included) and adds no code. Both are released together;
+  `md4a` 0.1.0 was published after `md4a-fastapi` 0.1.0.
 
 ## [0.1.0] - 2026-10-17
 
@@ -74,5 +77,6 @@ First release.
   base install.
 - Python 3.11 to 3.14. Typed (`py.typed`).
 
-[Unreleased]: https://github.com/adamtasteslikegood/md4a-fastapi/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/adamtasteslikegood/md4a-fastapi/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/adamtasteslikegood/md4a-fastapi/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/adamtasteslikegood/md4a-fastapi/releases/tag/v0.1.0
