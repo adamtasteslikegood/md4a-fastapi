@@ -28,7 +28,8 @@ and stores verified or converted Markdown in memory or on disk.
   applications. It must not import FastAPI, Starlette, or httpx.
 - `md4a/_negotiation.py` — framework-neutral `Accept` parsing, charset lookup, `Vary`
   merging, the HTML representation headers, and HTML-to-Markdown conversion (content
-  and strip selectors, `escape_misc`, literal code spans); shared by both middlewares.
+  and strip selectors, `escape_misc`, literal code spans, frontmatter, JSON-LD); shared
+  by both middlewares.
 - `md4a/client.py` — requests remote URLs with `Accept: text/markdown`; validates
   schemes, redirects, host allowlists, status codes, media type, and response size.
 - `md4a/store.py` — `MemoryStore`, filesystem-backed `FileStore`, and the store protocol.
@@ -56,6 +57,9 @@ For middleware requests:
 3. Otherwise, the wrapped application runs normally.
 4. Successful HTML may be converted to Markdown and cached.
 5. Existing Markdown is cached; JSON and other response types pass through unchanged.
+6. Every `GET`/`HEAD` response that is HTML or Markdown, converted or not, carries
+   `Vary: Accept` (merged, `Vary: *` kept) unless `vary_html=False`, so shared caches
+   keep the representations apart. See README "Caching and CDNs".
 
 For remote discovery, only a response whose media type is exactly `text/markdown`
 is considered available. Do not infer availability merely because a body resembles

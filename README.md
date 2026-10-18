@@ -168,6 +168,40 @@ Use the two together: without `escape_misc`, a stray backtick in the page's own
 text can open a code span that runs into the literal one. Both options work the
 same in the WSGI middleware.
 
+### Metadata and structured data
+
+Three options, all off by default, follow the output format of Cloudflare's
+[Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/):
+
+```python
+add_md4a(
+    app,
+    content_selector="main",
+    frontmatter=True,
+    json_ld=True,
+    content_signal="ai-train=no, search=yes, ai-input=yes",
+)
+```
+
+- `frontmatter=True` starts the Markdown with a YAML block holding `title`,
+  `description`, and `image` from the page's meta tags. `<meta name="title">` and
+  `<meta name="description">` win over `og:title` and `og:description`, and `image`
+  comes from `og:image`. Only fields with a value are written, and there is no block
+  when none are. Values are quoted, so page text cannot add YAML keys.
+- `json_ld=True` ends the Markdown with each valid
+  `<script type="application/ld+json">` block from the page, such as Recipe or Article
+  schema, as a fenced `json` block. Invalid JSON, `NaN`/`Infinity`, and data nested too
+  deeply to parse are left out; text that cannot be sent as UTF-8 stays escaped.
+- `content_signal` adds a [Content-Signal](https://contentsignals.org/) header to the
+  Markdown responses md4a sends, whether converted, cached, or from a provider. An
+  application response that already has `Content-Signal` keeps its own, and is not
+  stored, since the store keeps only the body and a cache hit would otherwise get
+  the fallback. Cloudflare's default is `ai-train=yes, search=yes, ai-input=yes`.
+
+Frontmatter and JSON-LD are read from the whole document, so `<head>` metadata is
+kept even with `content_selector`. They apply to converted HTML only; provider,
+cached, and application-authored Markdown is served as it is.
+
 ## Flask and other WSGI applications
 
 `MarkdownForAgentsWSGIMiddleware` applies the same negotiation to a WSGI
@@ -231,6 +265,61 @@ add_md4a(app, cache_responses=False)  # convert every request
   publishing a change.
 - `cache_responses=False` stops md4a writing responses to the store. Content already
   in the store, and provider content, is still served.
+
+## Caching and CDNs
+
+A URL that md4a negotiates has two representations, HTML and Markdown, so a
+shared cache must key both on the `Accept` request header. md4a adds `Accept` to
+`Vary` on every `GET` and `HEAD` response whose media type is `text/html` or
+`text/markdown`: converted Markdown, and the HTML the application sends to
+browsers. It merges with the application's own `Vary` and leaves `Vary: *` alone.
+Other responses are untouched. Pass `vary_html=False` to stop it adding `Vary`
+to responses it does not convert.
+
+md4a sets no `Cache-Control`; converted responses keep the application's caching
+headers, minus validators such as `ETag` that described the HTML bytes.
+
+### Cloudflare
+
+By default Cloudflare ignores `Vary` when it caches. That is safe while HTML is
+not cached, which is Cloudflare's default. If a "Cache Everything" or other Cache
+Rule makes negotiated pages cacheable, whichever representation is cached first
+is served to everyone. Choose one of these:
+
+1. **Keep negotiated pages out of the cache.** Exclude their paths from any rule
+   that makes HTML eligible for cache.
+2. **Bypass the cache for Markdown requests.** Add a Cache Rule with the custom
+   filter expression below and **Cache eligibility: Bypass cache**, placed after
+   any rule that makes those pages eligible. Browsers keep getting cached HTML;
+   agents always reach the origin.
+
+   ```text
+   any(lower(http.request.headers["accept"][*])[*] contains "text/markdown")
+   ```
+
+   Header values keep the client's casing and `contains` is case-sensitive, while
+   md4a reads `Accept` case-insensitively, so the expression lowercases each
+   `Accept` value first. To check it on a staging zone with a cold cache, request
+   Markdown with unusual casing, then HTML, and confirm the HTML request gets HTML:
+
+   ```bash
+   curl -sI -H 'Accept: Text/Markdown' https://staging.example.com/page | grep -i content-type
+   curl -sI -H 'Accept: text/html' https://staging.example.com/page | grep -i content-type
+   ```
+
+3. **Cache both representations.** In a Cache Rule for those pages, set
+   **Vary** for `accept` to `normalize`, with media types `text/html` and
+   `text/markdown`. Cloudflare then stores one version per normalized `Accept` value
+   and forwards the normalized `Accept` to the origin. This needs `Vary: Accept` on
+   both representations, which md4a sends unless `vary_html=False`.
+
+Cache Rules, including Bypass and the Vary setting, are available on every plan.
+See Cloudflare's [Vary](https://developers.cloudflare.com/cache/concepts/vary/) and
+[Cache Rules settings](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/)
+documentation.
+
+For other CDNs and reverse proxies, make sure they honor `Vary: Accept` or add
+`Accept` to the cache key for these pages.
 
 ## Remote discovery and standalone service
 

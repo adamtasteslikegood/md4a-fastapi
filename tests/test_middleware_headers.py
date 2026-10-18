@@ -190,7 +190,7 @@ def test_nonconverted_responses_keep_headers_and_body(
     def page() -> Response:
         return original
 
-    add_md4a(app)
+    add_md4a(app, vary_html=False)
     with TestClient(app) as client:
         response = client.get("/", headers={"Accept": "text/markdown"})
     assert response.status_code == status
@@ -266,6 +266,8 @@ def _assert_asgi_passthrough(messages: list[Message]) -> None:
         "path": "/",
         "headers": [(b"accept", b"text/markdown")],
     }
-    asyncio.run(MarkdownForAgentsMiddleware(origin, store=store)(scope, receive, send))
+    asyncio.run(
+        MarkdownForAgentsMiddleware(origin, store=store, vary_html=False)(scope, receive, send)
+    )
     assert sent == messages
     assert store.get("/") is None

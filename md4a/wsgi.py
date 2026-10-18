@@ -9,9 +9,12 @@ from urllib.parse import quote
 from ._negotiation import (
     HTML_REPRESENTATION_HEADERS,
     MARKDOWN_CONTENT_TYPE,
+    NEGOTIATED_MEDIA_TYPES,
     accepts_markdown,
+    checked_content_signal,
     declared_charset,
     html_to_markdown,
+    media_type,
     vary_with_accept,
 )
 from .store import MemoryStore, Store
@@ -33,6 +36,23 @@ def _declared_length(headers: HeaderList) -> int:
         return int(next(iter(_values(headers, "content-length")), "0"))
     except ValueError:
         return 0
+
+
+def _vary_negotiated(start_response: StartResponse) -> StartResponse:
+    """Add Accept to Vary on every HTML or Markdown response started through it."""
+
+    def start_varying(
+        status: str, headers: HeaderList, exc_info: Any = None
+    ) -> Callable[[bytes], object]:
+        if media_type(next(iter(_values(headers, "content-type")), "")) in NEGOTIATED_MEDIA_TYPES:
+            vary = vary_with_accept(_values(headers, "vary"))
+            headers = [(name, value) for name, value in headers if name.lower() != "vary"]
+            headers.append(("Vary", vary))
+        if exc_info is None:
+            return start_response(status, headers)
+        return start_response(status, headers, exc_info)
+
+    return start_varying
 
 
 def _request_key(environ: Environ) -> str:
@@ -129,6 +149,10 @@ class MarkdownForAgentsWSGIMiddleware:
         strip_selectors: Sequence[str] = (),
         escape_misc: bool = False,
         literal_selectors: Sequence[str] = (),
+        frontmatter: bool = False,
+        json_ld: bool = False,
+        content_signal: str | None = None,
+        vary_html: bool = True,
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -140,8 +164,16 @@ class MarkdownForAgentsWSGIMiddleware:
         self.strip_selectors = tuple(strip_selectors)
         self.escape_misc = escape_misc
         self.literal_selectors = tuple(literal_selectors)
+        self.frontmatter = frontmatter
+        self.json_ld = json_ld
+        self.content_signal = checked_content_signal(content_signal)
+        self.vary_html = vary_html
 
     def __call__(self, environ: Environ, start_response: StartResponse) -> Iterable[bytes]:
+        if self.vary_html and environ.get("REQUEST_METHOD") in {"GET", "HEAD"}:
+            # The HTML a browser gets is one representation of a URL that also
+            # has a Markdown one, so caches must key it on Accept too.
+            start_response = _vary_negotiated(start_response)
         if environ.get("REQUEST_METHOD") != "GET" or not accepts_markdown(
             environ.get("HTTP_ACCEPT", "")
         ):
@@ -252,7 +284,7 @@ class MarkdownForAgentsWSGIMiddleware:
                 text = None
             if text is None or exchange.media_type == "text/markdown":
                 # Undecodable content is returned as the application sent it, uncached.
-                if text is not None and self.cache_responses:
+                if text is not None and self._may_cache(exchange.headers):
                     self.store.put(key, text)
                 start_response(exchange.status, exchange.headers)
                 yield body
@@ -263,16 +295,28 @@ class MarkdownForAgentsWSGIMiddleware:
                 strip_selectors=self.strip_selectors,
                 escape_misc=self.escape_misc,
                 literal_selectors=self.literal_selectors,
+                frontmatter=self.frontmatter,
+                json_ld=self.json_ld,
             )
-            if self.cache_responses:
+            if self._may_cache(exchange.headers):
                 self.store.put(key, converted)
             yield self._start_markdown(start_response, converted, exchange.status, exchange.headers)
 
         return _ClosingIterator(negotiate_result(), close_result)
 
-    @staticmethod
+    def _may_cache(self, headers: HeaderList) -> bool:
+        """Whether a response may go in the store, which keeps its body only.
+
+        A response with its own Content-Signal is not stored when content_signal
+        is set: a cache hit would otherwise get the fallback instead of the
+        application's policy.
+        """
+        if not self.cache_responses:
+            return False
+        return self.content_signal is None or not _values(headers, "content-signal")
+
     def _start_markdown(
-        start_response: StartResponse, content: str, status: str, headers: HeaderList
+        self, start_response: StartResponse, content: str, status: str, headers: HeaderList
     ) -> bytes:
         body = content.encode("utf-8")
         # Keep repeated fields (especially Set-Cookie); drop what described the
@@ -288,5 +332,8 @@ class MarkdownForAgentsWSGIMiddleware:
             ("Content-Length", str(len(body))),
             ("Vary", vary_with_accept(_values(headers, "vary"))),
         ]
+        # The application's own Content-Signal, when it sent one, wins.
+        if self.content_signal is not None and not _values(headers, "content-signal"):
+            kept.append(("Content-Signal", self.content_signal))
         start_response(status, kept)
         return body
