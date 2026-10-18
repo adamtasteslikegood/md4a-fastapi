@@ -260,7 +260,17 @@ is served to everyone. Choose one of these:
    agents always reach the origin.
 
    ```text
-   any(http.request.headers["accept"][*] contains "text/markdown")
+   any(lower(http.request.headers["accept"][*])[*] contains "text/markdown")
+   ```
+
+   Header values keep the client's casing and `contains` is case-sensitive, while
+   md4a reads `Accept` case-insensitively, so the expression lowercases each
+   `Accept` value first. To check it on a staging zone with a cold cache, request
+   Markdown with unusual casing, then HTML, and confirm the HTML request gets HTML:
+
+   ```bash
+   curl -sI -H 'Accept: Text/Markdown' https://staging.example.com/page | grep -i content-type
+   curl -sI -H 'Accept: text/html' https://staging.example.com/page | grep -i content-type
    ```
 
 3. **Cache both representations.** In a Cache Rule for those pages, set
