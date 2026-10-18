@@ -168,6 +168,38 @@ Use the two together: without `escape_misc`, a stray backtick in the page's own
 text can open a code span that runs into the literal one. Both options work the
 same in the WSGI middleware.
 
+### Metadata and structured data
+
+Three options, all off by default, follow the output format of Cloudflare's
+[Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/):
+
+```python
+add_md4a(
+    app,
+    content_selector="main",
+    frontmatter=True,
+    json_ld=True,
+    content_signal="ai-train=no, search=yes, ai-input=yes",
+)
+```
+
+- `frontmatter=True` starts the Markdown with a YAML block holding `title`,
+  `description`, and `image` from the page's meta tags. `<meta name="title">` and
+  `<meta name="description">` win over `og:title` and `og:description`, and `image`
+  comes from `og:image`. Only fields with a value are written, and there is no block
+  when none are. Values are quoted, so page text cannot add YAML keys.
+- `json_ld=True` ends the Markdown with each valid
+  `<script type="application/ld+json">` block from the page, such as Recipe or Article
+  schema, as a fenced `json` block. Invalid JSON is left out.
+- `content_signal` adds a [Content-Signal](https://contentsignals.org/) header to the
+  Markdown responses md4a sends, whether converted, cached, or from a provider. An
+  application response that already has `Content-Signal` keeps its own. Cloudflare's
+  default is `ai-train=yes, search=yes, ai-input=yes`.
+
+Frontmatter and JSON-LD are read from the whole document, so `<head>` metadata is
+kept even with `content_selector`. They apply to converted HTML only; provider,
+cached, and application-authored Markdown is served as it is.
+
 ## Flask and other WSGI applications
 
 `MarkdownForAgentsWSGIMiddleware` applies the same negotiation to a WSGI

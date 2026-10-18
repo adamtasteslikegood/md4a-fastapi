@@ -10,6 +10,7 @@ from ._negotiation import (
     HTML_REPRESENTATION_HEADERS,
     MARKDOWN_CONTENT_TYPE,
     accepts_markdown,
+    checked_content_signal,
     declared_charset,
     html_to_markdown,
     vary_with_accept,
@@ -65,6 +66,9 @@ class MarkdownForAgentsMiddleware:
         strip_selectors: Sequence[str] = (),
         escape_misc: bool = False,
         literal_selectors: Sequence[str] = (),
+        frontmatter: bool = False,
+        json_ld: bool = False,
+        content_signal: str | None = None,
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -76,6 +80,9 @@ class MarkdownForAgentsMiddleware:
         self.strip_selectors = tuple(strip_selectors)
         self.escape_misc = escape_misc
         self.literal_selectors = tuple(literal_selectors)
+        self.frontmatter = frontmatter
+        self.json_ld = json_ld
+        self.content_signal = checked_content_signal(content_signal)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["method"] != "GET":
@@ -180,6 +187,8 @@ class MarkdownForAgentsMiddleware:
                 strip_selectors=self.strip_selectors,
                 escape_misc=self.escape_misc,
                 literal_selectors=self.literal_selectors,
+                frontmatter=self.frontmatter,
+                json_ld=self.json_ld,
             )
             if self.cache_responses:
                 self.store.put(key, converted)
@@ -189,8 +198,8 @@ class MarkdownForAgentsMiddleware:
 
         await self.app(scope, receive, capture)
 
-    @staticmethod
     async def _send_markdown(
+        self,
         send: Send,
         content: str,
         status: int = 200,
@@ -213,6 +222,9 @@ class MarkdownForAgentsMiddleware:
         headers["content-type"] = MARKDOWN_CONTENT_TYPE
         headers["content-length"] = str(len(body))
         headers["vary"] = vary_with_accept(headers.getlist("vary"))
+        # The application's own Content-Signal, when it sent one, wins.
+        if self.content_signal is not None and "content-signal" not in headers:
+            headers["content-signal"] = self.content_signal
         await send(message)
         await send({"type": "http.response.body", "body": body})
 
@@ -229,6 +241,9 @@ def add_md4a(
     strip_selectors: Sequence[str] = (),
     escape_misc: bool = False,
     literal_selectors: Sequence[str] = (),
+    frontmatter: bool = False,
+    json_ld: bool = False,
+    content_signal: str | None = None,
 ) -> None:
     """Add Markdown-for-Agents negotiation to an existing FastAPI app."""
     app.add_middleware(
@@ -242,4 +257,7 @@ def add_md4a(
         strip_selectors=strip_selectors,
         escape_misc=escape_misc,
         literal_selectors=literal_selectors,
+        frontmatter=frontmatter,
+        json_ld=json_ld,
+        content_signal=content_signal,
     )

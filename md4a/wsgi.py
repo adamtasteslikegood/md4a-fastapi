@@ -10,6 +10,7 @@ from ._negotiation import (
     HTML_REPRESENTATION_HEADERS,
     MARKDOWN_CONTENT_TYPE,
     accepts_markdown,
+    checked_content_signal,
     declared_charset,
     html_to_markdown,
     vary_with_accept,
@@ -129,6 +130,9 @@ class MarkdownForAgentsWSGIMiddleware:
         strip_selectors: Sequence[str] = (),
         escape_misc: bool = False,
         literal_selectors: Sequence[str] = (),
+        frontmatter: bool = False,
+        json_ld: bool = False,
+        content_signal: str | None = None,
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -140,6 +144,9 @@ class MarkdownForAgentsWSGIMiddleware:
         self.strip_selectors = tuple(strip_selectors)
         self.escape_misc = escape_misc
         self.literal_selectors = tuple(literal_selectors)
+        self.frontmatter = frontmatter
+        self.json_ld = json_ld
+        self.content_signal = checked_content_signal(content_signal)
 
     def __call__(self, environ: Environ, start_response: StartResponse) -> Iterable[bytes]:
         if environ.get("REQUEST_METHOD") != "GET" or not accepts_markdown(
@@ -263,6 +270,8 @@ class MarkdownForAgentsWSGIMiddleware:
                 strip_selectors=self.strip_selectors,
                 escape_misc=self.escape_misc,
                 literal_selectors=self.literal_selectors,
+                frontmatter=self.frontmatter,
+                json_ld=self.json_ld,
             )
             if self.cache_responses:
                 self.store.put(key, converted)
@@ -270,9 +279,8 @@ class MarkdownForAgentsWSGIMiddleware:
 
         return _ClosingIterator(negotiate_result(), close_result)
 
-    @staticmethod
     def _start_markdown(
-        start_response: StartResponse, content: str, status: str, headers: HeaderList
+        self, start_response: StartResponse, content: str, status: str, headers: HeaderList
     ) -> bytes:
         body = content.encode("utf-8")
         # Keep repeated fields (especially Set-Cookie); drop what described the
@@ -288,5 +296,8 @@ class MarkdownForAgentsWSGIMiddleware:
             ("Content-Length", str(len(body))),
             ("Vary", vary_with_accept(_values(headers, "vary"))),
         ]
+        # The application's own Content-Signal, when it sent one, wins.
+        if self.content_signal is not None and not _values(headers, "content-signal"):
+            kept.append(("Content-Signal", self.content_signal))
         start_response(status, kept)
         return body
