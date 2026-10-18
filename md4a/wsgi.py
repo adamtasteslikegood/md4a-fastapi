@@ -259,7 +259,7 @@ class MarkdownForAgentsWSGIMiddleware:
                 text = None
             if text is None or exchange.media_type == "text/markdown":
                 # Undecodable content is returned as the application sent it, uncached.
-                if text is not None and self.cache_responses:
+                if text is not None and self._may_cache(exchange.headers):
                     self.store.put(key, text)
                 start_response(exchange.status, exchange.headers)
                 yield body
@@ -273,11 +273,22 @@ class MarkdownForAgentsWSGIMiddleware:
                 frontmatter=self.frontmatter,
                 json_ld=self.json_ld,
             )
-            if self.cache_responses:
+            if self._may_cache(exchange.headers):
                 self.store.put(key, converted)
             yield self._start_markdown(start_response, converted, exchange.status, exchange.headers)
 
         return _ClosingIterator(negotiate_result(), close_result)
+
+    def _may_cache(self, headers: HeaderList) -> bool:
+        """Whether a response may go in the store, which keeps its body only.
+
+        A response with its own Content-Signal is not stored when content_signal
+        is set: a cache hit would otherwise get the fallback instead of the
+        application's policy.
+        """
+        if not self.cache_responses:
+            return False
+        return self.content_signal is None or not _values(headers, "content-signal")
 
     def _start_markdown(
         self, start_response: StartResponse, content: str, status: str, headers: HeaderList

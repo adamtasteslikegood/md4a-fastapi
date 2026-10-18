@@ -231,3 +231,152 @@ def test_wsgi_applications_own_content_signal_wins() -> None:
 def test_wsgi_content_signal_is_not_added_to_html() -> None:
     headers, _ = wsgi_call(wsgi_page(), accept="text/html", content_signal="x=y")
     assert all(name.lower() != "content-signal" for name, _ in headers)
+
+
+def ld_page(payload: str) -> str:
+    return f'<script type="application/ld+json">{payload}</script><p>x</p>'
+
+
+def test_json_ld_keeps_non_ascii_text_readable() -> None:
+    markdown = html_to_markdown(ld_page('{"name": "Café crème"}'), json_ld=True)
+    assert '"name": "Café crème"' in markdown
+
+
+def test_json_ld_escapes_a_lone_surrogate_instead_of_emitting_it() -> None:
+    markdown = html_to_markdown(ld_page('{"name": "\\ud800", "other": "Café"}'), json_ld=True)
+    markdown.encode("utf-8")
+    assert '"name": "\\ud800"' in markdown
+    assert json_ld_of(markdown) == [{"name": "\ud800", "other": "Café"}]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ['{"x": NaN}', '{"x": Infinity}', '{"x": -Infinity}', '{"x": 1e999}', "[" * 200_000],
+    ids=["nan", "infinity", "negative-infinity", "overflow", "deep-nesting"],
+)
+def test_json_ld_skips_non_json_constants_and_deep_nesting(payload: str) -> None:
+    payload = payload if payload[0] != "[" else payload + "]" * 200_000
+    assert html_to_markdown(ld_page(payload), json_ld=True) == html_to_markdown(ld_page(payload))
+
+
+SURROGATE_PAGE = ld_page('{"name": "\\ud800"}')
+
+
+def test_asgi_lone_surrogate_json_ld_is_served_and_cached() -> None:
+    app = FastAPI()
+
+    @app.get("/", response_class=HTMLResponse)
+    def page() -> str:
+        return SURROGATE_PAGE
+
+    store = MemoryStore()
+    add_md4a(app, store=store, json_ld=True)
+    with TestClient(app) as client:
+        first = client.get("/", headers={"Accept": "text/markdown"})
+        second = client.get("/", headers={"Accept": "text/markdown"})
+    assert first.status_code == second.status_code == 200
+    assert first.text == second.text
+    assert '"name": "\\ud800"' in first.text
+    assert "/" in store.data
+
+
+def test_wsgi_lone_surrogate_json_ld_is_served_and_cached() -> None:
+    store = MemoryStore()
+
+    def app(environ: dict[str, Any], start_response: Callable[..., Any]) -> list[bytes]:
+        start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
+        return [SURROGATE_PAGE.encode()]
+
+    middleware = MarkdownForAgentsWSGIMiddleware(app, store=store, json_ld=True)
+    first, second = (wsgi_request(middleware) for _ in range(2))
+    assert first[1] == second[1]
+    assert '"name": "\\ud800"' in first[1]
+    assert "/" in store.data
+
+
+def wsgi_request(
+    middleware: MarkdownForAgentsWSGIMiddleware, path: str = "/"
+) -> tuple[list[tuple[str, str]], str]:
+    environ: dict[str, Any] = {
+        "REQUEST_METHOD": "GET",
+        "HTTP_ACCEPT": "text/markdown",
+        "PATH_INFO": path,
+        "QUERY_STRING": "",
+    }
+    setup_testing_defaults(environ)
+    started: list[list[tuple[str, str]]] = []
+    result = middleware(environ, lambda status, headers, exc_info=None: started.append(headers))
+    body = b"".join(result).decode()
+    getattr(result, "close", lambda: None)()
+    return started[-1], body
+
+
+def signal_of(headers: Any) -> list[str]:
+    if hasattr(headers, "get_list"):
+        return headers.get_list("content-signal")
+    return [value for name, value in headers if name.lower() == "content-signal"]
+
+
+def test_asgi_applications_signal_survives_cache_hits_and_fallback_still_applies() -> None:
+    app = FastAPI()
+
+    @app.get("/signed", response_class=HTMLResponse)
+    def signed() -> HTMLResponse:
+        return HTMLResponse("<p>signed</p>", headers={"Content-Signal": "ai-train=no"})
+
+    @app.get("/native")
+    def native() -> HTMLResponse:
+        return HTMLResponse(
+            "# Native\n", media_type="text/markdown", headers={"Content-Signal": "ai-train=no"}
+        )
+
+    @app.get("/plain", response_class=HTMLResponse)
+    def plain() -> str:
+        return "<p>plain</p>"
+
+    store = MemoryStore()
+    add_md4a(app, store=store, content_signal="ai-train=yes")
+    with TestClient(app) as client:
+        for path, expected in [("/signed", "ai-train=no"), ("/native", "ai-train=no")]:
+            for _ in range(2):
+                response = client.get(path, headers={"Accept": "text/markdown"})
+                assert signal_of(response.headers) == [expected], path
+        plain = [client.get("/plain", headers={"Accept": "text/markdown"}) for _ in range(2)]
+    assert [signal_of(response.headers) for response in plain] == [["ai-train=yes"]] * 2
+    assert set(store.data) == {"/plain"}
+
+
+def test_wsgi_applications_signal_survives_cache_hits_and_fallback_still_applies() -> None:
+    def app(environ: dict[str, Any], start_response: Callable[..., Any]) -> list[bytes]:
+        path = environ["PATH_INFO"]
+        if path == "/native":
+            start_response(
+                "200 OK", [("Content-Type", "text/markdown"), ("Content-Signal", "ai-train=no")]
+            )
+            return [b"# Native\n"]
+        headers = [("Content-Type", "text/html; charset=utf-8")]
+        if path == "/signed":
+            headers.append(("Content-Signal", "ai-train=no"))
+        start_response("200 OK", headers)
+        return [b"<p>page</p>"]
+
+    store = MemoryStore()
+    middleware = MarkdownForAgentsWSGIMiddleware(app, store=store, content_signal="ai-train=yes")
+    for path, expected in [
+        ("/signed", ["ai-train=no"]),
+        ("/native", ["ai-train=no"]),
+        ("/plain", ["ai-train=yes"]),
+    ]:
+        for _ in range(2):
+            assert signal_of(wsgi_request(middleware, path)[0]) == expected, path
+    assert set(store.data) == {"/plain"}
+
+
+def test_applications_signal_is_cached_as_usual_without_a_fallback() -> None:
+    def app(environ: dict[str, Any], start_response: Callable[..., Any]) -> list[bytes]:
+        start_response("200 OK", [("Content-Type", "text/html"), ("Content-Signal", "ai-train=no")])
+        return [b"<p>page</p>"]
+
+    store = MemoryStore()
+    wsgi_request(MarkdownForAgentsWSGIMiddleware(app, store=store))
+    assert set(store.data) == {"/"}

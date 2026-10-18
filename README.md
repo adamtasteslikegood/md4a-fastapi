@@ -190,11 +190,13 @@ add_md4a(
   when none are. Values are quoted, so page text cannot add YAML keys.
 - `json_ld=True` ends the Markdown with each valid
   `<script type="application/ld+json">` block from the page, such as Recipe or Article
-  schema, as a fenced `json` block. Invalid JSON is left out.
+  schema, as a fenced `json` block. Invalid JSON, `NaN`/`Infinity`, and data nested too
+  deeply to parse are left out; text that cannot be sent as UTF-8 stays escaped.
 - `content_signal` adds a [Content-Signal](https://contentsignals.org/) header to the
   Markdown responses md4a sends, whether converted, cached, or from a provider. An
-  application response that already has `Content-Signal` keeps its own. Cloudflare's
-  default is `ai-train=yes, search=yes, ai-input=yes`.
+  application response that already has `Content-Signal` keeps its own, and is not
+  stored, since the store keeps only the body and a cache hit would otherwise get
+  the fallback. Cloudflare's default is `ai-train=yes, search=yes, ai-input=yes`.
 
 Frontmatter and JSON-LD are read from the whole document, so `<head>` metadata is
 kept even with `content_selector`. They apply to converted HTML only; provider,

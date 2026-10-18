@@ -162,6 +162,10 @@ def _frontmatter(soup: BeautifulSoup) -> str:
     return "---\n" + "\n".join(lines) + "\n---" if lines else ""
 
 
+def _reject_constant(name: str) -> None:
+    raise ValueError(f"{name} is not valid JSON")
+
+
 def _json_ld_blocks(soup: BeautifulSoup) -> list[str]:
     """Each valid JSON-LD script in the page as a fenced json block."""
     blocks = []
@@ -169,10 +173,18 @@ def _json_ld_blocks(soup: BeautifulSoup) -> list[str]:
         if str(script.get("type", "")).partition(";")[0].strip().lower() != "application/ld+json":
             continue
         try:
-            data = json.loads(script.get_text())
-        except ValueError:
-            continue  # Not valid JSON: leave it out rather than pass on a broken block.
-        text = json.dumps(data, indent=2, ensure_ascii=False)
+            data = json.loads(script.get_text(), parse_constant=_reject_constant)
+            text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
+            try:
+                text.encode("utf-8")
+            except UnicodeEncodeError:
+                # An escaped lone surrogate parses to a character UTF-8 cannot
+                # carry; keep this block's non-ASCII characters escaped instead.
+                text = json.dumps(data, indent=2, allow_nan=False)
+        except (ValueError, RecursionError):
+            # Not valid JSON (including NaN and Infinity) or nested too deeply:
+            # leave it out rather than pass on a broken block or fail the page.
+            continue
         fence = "`" * max(3, max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
         blocks.append(f"{fence}json\n{text}\n{fence}")
     return blocks

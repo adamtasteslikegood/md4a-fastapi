@@ -176,7 +176,7 @@ class MarkdownForAgentsMiddleware:
                 text = None
             if text is None or media_type == "text/markdown":
                 # Undecodable content is returned as the application sent it, uncached.
-                if text is not None and self.cache_responses:
+                if text is not None and self._may_cache(start["headers"]):
                     self.store.put(key, text)
                 await send(start)
                 await send({"type": "http.response.body", "body": body})
@@ -190,13 +190,25 @@ class MarkdownForAgentsMiddleware:
                 frontmatter=self.frontmatter,
                 json_ld=self.json_ld,
             )
-            if self.cache_responses:
+            if self._may_cache(start["headers"]):
                 self.store.put(key, converted)
             await self._send_markdown(
                 send, converted, status=start["status"], raw_headers=start["headers"]
             )
 
         await self.app(scope, receive, capture)
+
+    def _may_cache(self, raw_headers: list[tuple[bytes, bytes]]) -> bool:
+        """Whether a response may go in the store, which keeps its body only.
+
+        A response with its own Content-Signal is not stored when content_signal
+        is set: a cache hit would otherwise get the fallback instead of the
+        application's policy.
+        """
+        if not self.cache_responses:
+            return False
+        own_signal = any(name.lower() == b"content-signal" for name, _ in raw_headers)
+        return self.content_signal is None or not own_signal
 
     async def _send_markdown(
         self,
