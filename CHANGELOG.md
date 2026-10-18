@@ -7,6 +7,11 @@ the API.
 
 ## [Unreleased]
 
+### Added
+
+- The `md4a` distribution on PyPI: `pip install md4a` installs `md4a-fastapi` at the
+  same version (extras included) and adds no code. Both are released together.
+
 ## [0.1.0] - 2026-10-17
 
 First release.
