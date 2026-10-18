@@ -11,6 +11,7 @@ from ._negotiation import (
     MARKDOWN_CONTENT_TYPE,
     NEGOTIATED_MEDIA_TYPES,
     accepts_markdown,
+    checked_content_signal,
     declared_charset,
     html_to_markdown,
     media_type,
@@ -85,6 +86,9 @@ class MarkdownForAgentsMiddleware:
         strip_selectors: Sequence[str] = (),
         escape_misc: bool = False,
         literal_selectors: Sequence[str] = (),
+        frontmatter: bool = False,
+        json_ld: bool = False,
+        content_signal: str | None = None,
         vary_html: bool = True,
     ) -> None:
         self.app = app
@@ -97,6 +101,9 @@ class MarkdownForAgentsMiddleware:
         self.strip_selectors = tuple(strip_selectors)
         self.escape_misc = escape_misc
         self.literal_selectors = tuple(literal_selectors)
+        self.frontmatter = frontmatter
+        self.json_ld = json_ld
+        self.content_signal = checked_content_signal(content_signal)
         self.vary_html = vary_html
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -198,7 +205,7 @@ class MarkdownForAgentsMiddleware:
                 text = None
             if text is None or media_type == "text/markdown":
                 # Undecodable content is returned as the application sent it, uncached.
-                if text is not None and self.cache_responses:
+                if text is not None and self._may_cache(start["headers"]):
                     self.store.put(key, text)
                 await send(start)
                 await send({"type": "http.response.body", "body": body})
@@ -209,8 +216,10 @@ class MarkdownForAgentsMiddleware:
                 strip_selectors=self.strip_selectors,
                 escape_misc=self.escape_misc,
                 literal_selectors=self.literal_selectors,
+                frontmatter=self.frontmatter,
+                json_ld=self.json_ld,
             )
-            if self.cache_responses:
+            if self._may_cache(start["headers"]):
                 self.store.put(key, converted)
             await self._send_markdown(
                 send, converted, status=start["status"], raw_headers=start["headers"]
@@ -218,8 +227,20 @@ class MarkdownForAgentsMiddleware:
 
         await self.app(scope, receive, capture)
 
-    @staticmethod
+    def _may_cache(self, raw_headers: list[tuple[bytes, bytes]]) -> bool:
+        """Whether a response may go in the store, which keeps its body only.
+
+        A response with its own Content-Signal is not stored when content_signal
+        is set: a cache hit would otherwise get the fallback instead of the
+        application's policy.
+        """
+        if not self.cache_responses:
+            return False
+        own_signal = any(name.lower() == b"content-signal" for name, _ in raw_headers)
+        return self.content_signal is None or not own_signal
+
     async def _send_markdown(
+        self,
         send: Send,
         content: str,
         status: int = 200,
@@ -242,6 +263,9 @@ class MarkdownForAgentsMiddleware:
         headers["content-type"] = MARKDOWN_CONTENT_TYPE
         headers["content-length"] = str(len(body))
         headers["vary"] = vary_with_accept(headers.getlist("vary"))
+        # The application's own Content-Signal, when it sent one, wins.
+        if self.content_signal is not None and "content-signal" not in headers:
+            headers["content-signal"] = self.content_signal
         await send(message)
         await send({"type": "http.response.body", "body": body})
 
@@ -258,6 +282,9 @@ def add_md4a(
     strip_selectors: Sequence[str] = (),
     escape_misc: bool = False,
     literal_selectors: Sequence[str] = (),
+    frontmatter: bool = False,
+    json_ld: bool = False,
+    content_signal: str | None = None,
     vary_html: bool = True,
 ) -> None:
     """Add Markdown-for-Agents negotiation to an existing FastAPI app."""
@@ -272,5 +299,8 @@ def add_md4a(
         strip_selectors=strip_selectors,
         escape_misc=escape_misc,
         literal_selectors=literal_selectors,
+        frontmatter=frontmatter,
+        json_ld=json_ld,
+        content_signal=content_signal,
         vary_html=vary_html,
     )

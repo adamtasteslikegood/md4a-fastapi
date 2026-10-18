@@ -5,6 +5,7 @@ Nothing here imports a web framework, so either middleware can use it alone.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Sequence
 from email.message import Message as EmailMessage
@@ -57,6 +58,13 @@ def declared_charset(content_type: str) -> str:
     message = EmailMessage()
     message["content-type"] = content_type
     return message.get_content_charset() or "utf-8"
+
+
+def checked_content_signal(value: str | None) -> str | None:
+    """A Content-Signal header value, refused if it could split the header."""
+    if value is not None and any(char in value for char in "\r\n\0"):
+        raise ValueError("content_signal must be a single header line")
+    return value
 
 
 # Media types md4a negotiates between: a response of either type is one
@@ -134,6 +142,64 @@ class _Converter(MarkdownConverter):
         return _code_span(el.get_text(), in_table=el.find_parent(["td", "th"]) is not None)
 
 
+def _meta_content(soup: BeautifulSoup, attribute: str, value: str) -> str | None:
+    """The first non-empty content of a meta tag whose attribute matches, ignoring case."""
+    for tag in soup.find_all("meta"):
+        if str(tag.get(attribute, "")).strip().lower() == value:
+            content = " ".join(str(tag.get("content", "")).split())
+            if content:
+                return content
+    return None
+
+
+def _frontmatter(soup: BeautifulSoup) -> str:
+    """YAML frontmatter from the page's meta tags, as Cloudflare's Markdown for Agents emits.
+
+    Standard meta tags win over Open Graph ones whatever their order. Values are
+    written as JSON strings, which YAML reads as double-quoted scalars, so page
+    text cannot add keys or break out of the block.
+    """
+    fields = {
+        "title": _meta_content(soup, "name", "title")
+        or _meta_content(soup, "property", "og:title"),
+        "description": _meta_content(soup, "name", "description")
+        or _meta_content(soup, "property", "og:description"),
+        "image": _meta_content(soup, "property", "og:image"),
+    }
+    lines = [
+        f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in fields.items() if value
+    ]
+    return "---\n" + "\n".join(lines) + "\n---" if lines else ""
+
+
+def _reject_constant(name: str) -> None:
+    raise ValueError(f"{name} is not valid JSON")
+
+
+def _json_ld_blocks(soup: BeautifulSoup) -> list[str]:
+    """Each valid JSON-LD script in the page as a fenced json block."""
+    blocks = []
+    for script in soup.find_all("script"):
+        if str(script.get("type", "")).partition(";")[0].strip().lower() != "application/ld+json":
+            continue
+        try:
+            data = json.loads(script.get_text(), parse_constant=_reject_constant)
+            text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
+            try:
+                text.encode("utf-8")
+            except UnicodeEncodeError:
+                # An escaped lone surrogate parses to a character UTF-8 cannot
+                # carry; keep this block's non-ASCII characters escaped instead.
+                text = json.dumps(data, indent=2, allow_nan=False)
+        except (ValueError, RecursionError):
+            # Not valid JSON (including NaN and Infinity) or nested too deeply:
+            # leave it out rather than pass on a broken block or fail the page.
+            continue
+        fence = "`" * max(3, max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
+        blocks.append(f"{fence}json\n{text}\n{fence}")
+    return blocks
+
+
 def html_to_markdown(
     html: str,
     *,
@@ -141,6 +207,8 @@ def html_to_markdown(
     strip_selectors: Sequence[str] = (),
     escape_misc: bool = False,
     literal_selectors: Sequence[str] = (),
+    frontmatter: bool = False,
+    json_ld: bool = False,
 ) -> str:
     """Convert an HTML document to Markdown, optionally only part of it.
 
@@ -156,7 +224,37 @@ def html_to_markdown(
     link, image, or autolink. Use it for untrusted text such as user comments,
     together with ``escape_misc`` so a stray backtick in the page's own text
     cannot open a code span that runs into the literal one.
+
+    ``frontmatter`` prepends YAML frontmatter (``title``, ``description``,
+    ``image``) from the page's meta tags, and ``json_ld`` appends each JSON-LD
+    script as a fenced ``json`` block, in the layout of Cloudflare's Markdown for
+    Agents. Both read the whole document, whatever the selectors keep.
     """
+    body = _convert_body(
+        html,
+        content_selector=content_selector,
+        strip_selectors=strip_selectors,
+        escape_misc=escape_misc,
+        literal_selectors=literal_selectors,
+    )
+    if not frontmatter and not json_ld:
+        return body
+    document = BeautifulSoup(html, "html.parser")
+    head = _frontmatter(document) if frontmatter else ""
+    tail = _json_ld_blocks(document) if json_ld else []
+    if not head and not tail:
+        return body
+    return "\n\n".join(part for part in [head, body.strip("\n"), *tail] if part) + "\n"
+
+
+def _convert_body(
+    html: str,
+    *,
+    content_selector: str | None,
+    strip_selectors: Sequence[str],
+    escape_misc: bool,
+    literal_selectors: Sequence[str],
+) -> str:
     converter = _Converter(heading_style="ATX", escape_misc=escape_misc)
     if content_selector is None and not strip_selectors and not literal_selectors:
         return converter.convert(html)
