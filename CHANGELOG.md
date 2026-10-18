@@ -7,6 +7,13 @@ the API.
 
 ## [Unreleased]
 
+### Changed
+
+- Both middlewares add `Accept` to `Vary` on every `GET`/`HEAD` response whose media
+  type is `text/html` or `text/markdown`, including the HTML sent to browsers, so
+  shared caches keep the two representations apart. `vary_html=False` turns this
+  off for responses md4a does not convert. (#46)
+
 ### Added
 
 - `frontmatter`, `json_ld`, and `content_signal` options on both middlewares and
@@ -14,7 +21,9 @@ the API.
   YAML frontmatter from `title`/`description`/`image` meta tags, JSON-LD scripts as
   fenced `json` blocks at the end, and a `Content-Signal` header on Markdown responses
   unless the application set its own. (#47)
-
+- README "Caching and CDNs": why both representations need `Vary: Accept`, and three
+  Cloudflare setups (no HTML caching, bypass for Markdown requests, or the Cache
+  Rules Vary setting). (#46)
 - The `md4a` distribution on PyPI: `pip install md4a` installs `md4a-fastapi` at the
   same version (extras included) and adds no code. Both are released together.
 

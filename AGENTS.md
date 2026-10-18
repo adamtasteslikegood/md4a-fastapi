@@ -57,6 +57,9 @@ For middleware requests:
 3. Otherwise, the wrapped application runs normally.
 4. Successful HTML may be converted to Markdown and cached.
 5. Existing Markdown is cached; JSON and other response types pass through unchanged.
+6. Every `GET`/`HEAD` response that is HTML or Markdown, converted or not, carries
+   `Vary: Accept` (merged, `Vary: *` kept) unless `vary_html=False`, so shared caches
+   keep the representations apart. See README "Caching and CDNs".
 
 For remote discovery, only a response whose media type is exactly `text/markdown`
 is considered available. Do not infer availability merely because a body resembles

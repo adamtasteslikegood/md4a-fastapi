@@ -47,7 +47,9 @@ def _run(
         "path": "/",
         "headers": [(b"accept", b"text/markdown")],
     }
-    middleware = MarkdownForAgentsMiddleware(origin, store=store, max_html_bytes=max_html_bytes)
+    middleware = MarkdownForAgentsMiddleware(
+        origin, store=store, max_html_bytes=max_html_bytes, vary_html=False
+    )
     asyncio.run(middleware(scope, receive, send))
     return sent, progress, store
 

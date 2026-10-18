@@ -9,10 +9,12 @@ from urllib.parse import quote
 from ._negotiation import (
     HTML_REPRESENTATION_HEADERS,
     MARKDOWN_CONTENT_TYPE,
+    NEGOTIATED_MEDIA_TYPES,
     accepts_markdown,
     checked_content_signal,
     declared_charset,
     html_to_markdown,
+    media_type,
     vary_with_accept,
 )
 from .store import MemoryStore, Store
@@ -34,6 +36,23 @@ def _declared_length(headers: HeaderList) -> int:
         return int(next(iter(_values(headers, "content-length")), "0"))
     except ValueError:
         return 0
+
+
+def _vary_negotiated(start_response: StartResponse) -> StartResponse:
+    """Add Accept to Vary on every HTML or Markdown response started through it."""
+
+    def start_varying(
+        status: str, headers: HeaderList, exc_info: Any = None
+    ) -> Callable[[bytes], object]:
+        if media_type(next(iter(_values(headers, "content-type")), "")) in NEGOTIATED_MEDIA_TYPES:
+            vary = vary_with_accept(_values(headers, "vary"))
+            headers = [(name, value) for name, value in headers if name.lower() != "vary"]
+            headers.append(("Vary", vary))
+        if exc_info is None:
+            return start_response(status, headers)
+        return start_response(status, headers, exc_info)
+
+    return start_varying
 
 
 def _request_key(environ: Environ) -> str:
@@ -133,6 +152,7 @@ class MarkdownForAgentsWSGIMiddleware:
         frontmatter: bool = False,
         json_ld: bool = False,
         content_signal: str | None = None,
+        vary_html: bool = True,
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -147,8 +167,13 @@ class MarkdownForAgentsWSGIMiddleware:
         self.frontmatter = frontmatter
         self.json_ld = json_ld
         self.content_signal = checked_content_signal(content_signal)
+        self.vary_html = vary_html
 
     def __call__(self, environ: Environ, start_response: StartResponse) -> Iterable[bytes]:
+        if self.vary_html and environ.get("REQUEST_METHOD") in {"GET", "HEAD"}:
+            # The HTML a browser gets is one representation of a URL that also
+            # has a Markdown one, so caches must key it on Accept too.
+            start_response = _vary_negotiated(start_response)
         if environ.get("REQUEST_METHOD") != "GET" or not accepts_markdown(
             environ.get("HTTP_ACCEPT", "")
         ):
