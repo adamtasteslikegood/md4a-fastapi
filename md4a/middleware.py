@@ -9,9 +9,11 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from ._negotiation import (
     HTML_REPRESENTATION_HEADERS,
     MARKDOWN_CONTENT_TYPE,
+    NEGOTIATED_MEDIA_TYPES,
     accepts_markdown,
     declared_charset,
     html_to_markdown,
+    media_type,
     vary_with_accept,
 )
 from .store import MemoryStore, Store
@@ -27,6 +29,24 @@ def _declared_length(headers: Headers) -> int:
         return int(headers.get("content-length", "0"))
     except ValueError:
         return 0
+
+
+def _vary_negotiated(send: Send) -> Send:
+    """Add Accept to Vary on every HTML or Markdown response sent through send."""
+
+    async def send_varying(message: Message) -> None:
+        if message["type"] == "http.response.start":
+            raw = list(message.get("headers", []))
+            headers = Headers(raw=raw)
+            if media_type(headers.get("content-type", "")) in NEGOTIATED_MEDIA_TYPES:
+                vary = vary_with_accept(headers.getlist("vary"))
+                raw = [(name, value) for name, value in raw if name.lower() != b"vary"]
+                raw.append((b"vary", vary.encode("latin-1")))
+                # Copy rather than change the application's message.
+                message = {**message, "headers": raw}
+        await send(message)
+
+    return send_varying
 
 
 def _declared_charset(headers: Headers) -> str:
@@ -65,6 +85,7 @@ class MarkdownForAgentsMiddleware:
         strip_selectors: Sequence[str] = (),
         escape_misc: bool = False,
         literal_selectors: Sequence[str] = (),
+        vary_html: bool = True,
     ) -> None:
         self.app = app
         self.store = store or MemoryStore()
@@ -76,9 +97,17 @@ class MarkdownForAgentsMiddleware:
         self.strip_selectors = tuple(strip_selectors)
         self.escape_misc = escape_misc
         self.literal_selectors = tuple(literal_selectors)
+        self.vary_html = vary_html
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["method"] != "GET":
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        if self.vary_html and scope["method"] in {"GET", "HEAD"}:
+            # The HTML a browser gets is one representation of a URL that also
+            # has a Markdown one, so caches must key it on Accept too.
+            send = _vary_negotiated(send)
+        if scope["method"] != "GET":
             await self.app(scope, receive, send)
             return
         request_headers = Headers(scope=scope)
@@ -229,6 +258,7 @@ def add_md4a(
     strip_selectors: Sequence[str] = (),
     escape_misc: bool = False,
     literal_selectors: Sequence[str] = (),
+    vary_html: bool = True,
 ) -> None:
     """Add Markdown-for-Agents negotiation to an existing FastAPI app."""
     app.add_middleware(
@@ -242,4 +272,5 @@ def add_md4a(
         strip_selectors=strip_selectors,
         escape_misc=escape_misc,
         literal_selectors=literal_selectors,
+        vary_html=vary_html,
     )

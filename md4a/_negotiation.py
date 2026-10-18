@@ -59,6 +59,16 @@ def declared_charset(content_type: str) -> str:
     return message.get_content_charset() or "utf-8"
 
 
+# Media types md4a negotiates between: a response of either type is one
+# representation of a URL that has another, so caches must key it on Accept.
+NEGOTIATED_MEDIA_TYPES = frozenset({"text/html", "text/markdown"})
+
+
+def media_type(content_type: str) -> str:
+    """The media type of a Content-Type value, lowercased, without parameters."""
+    return content_type.partition(";")[0].strip().lower()
+
+
 def vary_with_accept(values: list[str]) -> str:
     """Merge the response's Vary field values and make sure Accept is among them."""
     vary = [item.strip() for value in values for item in value.split(",")]

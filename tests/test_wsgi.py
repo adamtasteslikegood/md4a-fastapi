@@ -95,7 +95,7 @@ def test_converts_and_caches_html() -> None:
 )
 def test_other_requests_pass_through_unchanged(accept: str, method: str) -> None:
     store = MemoryStore()
-    response = call(wrap(page(), store=store), accept=accept, method=method)
+    response = call(wrap(page(), store=store, vary_html=False), accept=accept, method=method)
     assert response.one("Content-Type") == "text/html; charset=utf-8"
     assert response.body == b"<h1>Hello</h1><p>Agent world</p>"
     assert response.all("Vary") == []
@@ -140,7 +140,7 @@ def test_unconvertible_responses_pass_through_uncached(
 ) -> None:
     store = MemoryStore()
     direct = call(app)
-    response = call(wrap(app, store=store))
+    response = call(wrap(app, store=store, vary_html=False))
     assert (response.status, response.headers, response.body) == (
         direct.status,
         direct.headers,
