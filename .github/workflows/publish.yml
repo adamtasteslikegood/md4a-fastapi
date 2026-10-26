@@ -74,7 +74,7 @@ jobs:
           name: release-distributions
           path: dist/
       - name: Publish to PyPI with trusted publishing
-        uses: pypa/gh-action-pypi-publish@v1.14.2
+        uses: pypa/gh-action-pypi-publish@v1.14.3
         with:
           # Files PyPI already has are skipped, so a manual run can publish one
           # distribution that is missing without failing on the other.
